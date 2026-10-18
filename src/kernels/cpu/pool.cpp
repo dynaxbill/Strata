@@ -3,6 +3,7 @@
 #include "strata/core/progress.hpp"
 #include "strata/platform/aux_cpus.hpp"
 #include "strata/kernels/cpu/expert_layout.hpp"
+#include "strata/platform/socket_rom.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -30,6 +31,13 @@
 namespace strata::kernels::cpu {
 
 namespace {
+template<class Job> const uint8_t* local_blob(const Job& j) {
+    if (!j.socket_blobs[0]) return j.blob;
+    const int role = strata::platform::SocketRom::current_role();
+    if (role < 0 || role > 1 || !j.socket_blobs[role])
+        throw std::runtime_error("P0: CPU worker has no verified socket-local ROM");
+    return j.socket_blobs[role];
+}
 // STRATA_POOL_UMWAIT=<TSC cycles> (experimental, x86 WAITPKG only): a parked worker waits with UMONITOR/UMWAIT on the
 // epoch's cache line instead of spinning on _mm_pause.  It wakes when the host publishes (a write to that line) or
 // after the cycles, in the light C0.1 state; on a laptop the CPU then gives back the power the spin took, which the
@@ -672,15 +680,15 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
         else { hstate_.store(ci, std::memory_order_relaxed); hstate_ms_.store(now_ms(), std::memory_order_relaxed); }
         if (mode_ == 0) {
             const ExpertJob& j = jobs_[i];
-            s2_expert_vnni_q(j.blob, *j.act, j.out, scratch);
+            s2_expert_vnni_q(local_blob(j), *j.act, j.out, scratch);
         } else if (mode_ == 1) {
             const int e = (int) i / parts_a_, part = (int) i % parts_a_;
             const int r0 = FF * part / parts_a_, r1 = FF * (part + 1) / parts_a_;
-            s2_expert_gu_rows(jobs_[e].blob, *jobs_[e].act, split_[(size_t) e].ff, r0, r1);
+            s2_expert_gu_rows(local_blob(jobs_[e]), *jobs_[e].act, split_[(size_t) e].ff, r0, r1);
         } else if (mode_ == 2) {
             const int e = (int) i / parts_b_, part = (int) i % parts_b_;
             const int r0 = H * part / parts_b_, r1 = H * (part + 1) / parts_b_;
-            s2_expert_down_rows(jobs_[e].blob, split_[(size_t) e].a2, jobs_[e].out, r0, r1);
+            s2_expert_down_rows(local_blob(jobs_[e]), split_[(size_t) e].a2, jobs_[e].out, r0, r1);
         } else if (mode_ >= 5) {
             // plan v0.3 P6: native layers, 5 = gate/up rows, 6 = down rows (the layer's own n_ff / n_embd: Flash-Next's
             // FF / H, or another family's smaller expert)
@@ -697,25 +705,25 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
                     float* up[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) { gp[t] = gbuf[t]; up[t] = ubuf[t]; }
                     const int nbk = (int) (nfmt_->n_embd / 64);
-                    q2_rows_any(mjobs_[e].blob, nfmt_->gu_row, nbk, mjobs_[e].act, mjobs_[e].nt, gp, r0, r1);
-                    q2_rows_any(mjobs_[e].blob + nfmt_->up_off, nfmt_->gu_row, nbk, mjobs_[e].act, mjobs_[e].nt, up, r0, r1);
+                    q2_rows_any(local_blob(mjobs_[e]), nfmt_->gu_row, nbk, mjobs_[e].act, mjobs_[e].nt, gp, r0, r1);
+                    q2_rows_any(local_blob(mjobs_[e]) + nfmt_->up_off, nfmt_->gu_row, nbk, mjobs_[e].act, mjobs_[e].nt, up, r0, r1);
                     for (int t = 0; t < mjobs_[e].nt; ++t)
                         for (int r = r0; r < r1; ++r)
                             sb.ff[t][r] = (gbuf[t][r] / (1.f + std::exp(-gbuf[t][r]))) * ubuf[t][r];
                 } else if (mode_ == 5) {
                     float* ff[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) ff[t] = sb.ff[t];
-                    native_gu_rows(*nfmt_, mjobs_[e].blob, mjobs_[e].nact, mjobs_[e].nt, ff, r0, r1);
+                    native_gu_rows(*nfmt_, local_blob(mjobs_[e]), mjobs_[e].nact, mjobs_[e].nt, ff, r0, r1);
                 } else if (q2_native_kernels(nfmt_->d_type)) {
                     // Q2_0 down (most IQ layers): the AVX-512 kernel, ggml-cpu has only a scalar one on x86
                     const ActQ* a2[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) a2[t] = &sb.a2[t];
-                    q2_rows_any(mjobs_[e].blob + nfmt_->down_off, nfmt_->d_row, (int) (nfmt_->n_ff / 64), a2,
+                    q2_rows_any(local_blob(mjobs_[e]) + nfmt_->down_off, nfmt_->d_row, (int) (nfmt_->n_ff / 64), a2,
                                 mjobs_[e].nt, mjobs_[e].out, r0, r1);
                 } else {
                     const void* hq[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) hq[t] = sb.hq[t];
-                    native_down_rows(*nfmt_, mjobs_[e].blob, hq, mjobs_[e].nt, mjobs_[e].out, r0, r1);
+                    native_down_rows(*nfmt_, local_blob(mjobs_[e]), hq, mjobs_[e].nt, mjobs_[e].out, r0, r1);
                 }
                 r += r1 - r0;
             }
@@ -730,11 +738,11 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
                 if (mode_ == 3) {
                     float* ff[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) ff[t] = sb.ff[t];
-                    s2_expert_gu_rows_multi(mjobs_[e].blob, mjobs_[e].act, mjobs_[e].nt, ff, r0, r1);
+                    s2_expert_gu_rows_multi(local_blob(mjobs_[e]), mjobs_[e].act, mjobs_[e].nt, ff, r0, r1);
                 } else {
                     const ActQ* a2[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) a2[t] = &sb.a2[t];
-                    s2_expert_down_rows_multi(mjobs_[e].blob, a2, mjobs_[e].nt, mjobs_[e].out, r0, r1);
+                    s2_expert_down_rows_multi(local_blob(mjobs_[e]), a2, mjobs_[e].nt, mjobs_[e].out, r0, r1);
                 }
                 r += r1 - r0;
             }
@@ -784,6 +792,8 @@ void ExpertPool::run_split_multi(ExpertJobMulti* jobs, int n) {
             for (int t = 0; t < jobs[e].nt; ++t) {
                 ExpertJob j;
                 j.blob = jobs[e].blob;
+                j.socket_blobs[0] = jobs[e].socket_blobs[0];
+                j.socket_blobs[1] = jobs[e].socket_blobs[1];
                 j.act = jobs[e].act[t];
                 j.out = jobs[e].out[t];
                 single.push_back(j);
@@ -848,7 +858,7 @@ void ExpertPool::run_split_multi_native(const NativeFmt& f, ExpertJobMulti* jobs
 void ExpertPool::run(ExpertJob* jobs, int n) {
     if (n <= 0) return;
     if (n_ == 1) {   // no workers: run inline, so a single-core machine still produces a token
-        for (int i = 0; i < n; ++i) s2_expert_vnni_q(jobs[i].blob, *jobs[i].act, jobs[i].out, scratch_[0]);
+        for (int i = 0; i < n; ++i) s2_expert_vnni_q(local_blob(jobs[i]), *jobs[i].act, jobs[i].out, scratch_[0]);
         return;
     }
     // Wait for every worker to be parked BEFORE touching the batch, so the publish below is the only thing
@@ -885,7 +895,7 @@ void ExpertPool::run(ExpertJob* jobs, int n) {
             hstate_.store(ci, std::memory_order_relaxed);
             hstate_ms_.store(now_ms(), std::memory_order_relaxed);
             const ExpertJob& j = jobs_[ci];
-            s2_expert_vnni_q(j.blob, *j.act, j.out, host_scratch_);
+            s2_expert_vnni_q(local_blob(j), *j.act, j.out, host_scratch_);
             done_.fetch_add(1, std::memory_order_release);
         }
     }

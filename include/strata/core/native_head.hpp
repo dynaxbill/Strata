@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "strata/platform/socket_rom.hpp"
 
 namespace strata::core {
 
@@ -57,6 +58,8 @@ public:
     void gather_one(int64_t token, float* out, void* stream) const;
     uint64_t bytes() const { return bytes_; }
     int type() const { return type_; }
+    const void* persistent_host_data() const { return host_; }
+    bool adopt_rom(std::shared_ptr<strata::platform::SocketRom> rom, size_t span, std::string& err);
 
 private:
     void* host_ = nullptr;
@@ -65,6 +68,7 @@ private:
     size_t row_ = 0;
     int64_t n_embd_ = 0, n_vocab_ = 0;
     int type_ = -1;
+    std::shared_ptr<strata::platform::SocketRom> rom_;
 };
 void set_native_embed(const NativeEmbed* e);
 const NativeEmbed* native_embed();

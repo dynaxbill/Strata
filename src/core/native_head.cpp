@@ -113,8 +113,21 @@ void set_native_embed(const NativeEmbed* e) { g_embed = e; }
 const NativeEmbed* native_embed() { return g_embed; }
 
 NativeEmbed::~NativeEmbed() {
+    if (rom_) { rom_.reset(); return; }
     if (host_) cudaFreeHost(host_);
     else if (dev_) cudaFree(const_cast<void*>(dev_));   // the VRAM fallback below
+}
+
+bool NativeEmbed::adopt_rom(std::shared_ptr<strata::platform::SocketRom> rom, size_t span, std::string& err) {
+    if (!host_ || rom_ || !rom || !rom->ready()) { err = "native embedding ROM ownership is invalid"; return false; }
+    const auto* p = rom->at(span, 0, rom->images()[0].generation);
+    void* alias = nullptr;
+    if (!p || cudaHostGetDevicePointer(&alias, const_cast<uint8_t*>(p), 0) != cudaSuccess || !alias) {
+        (void)cudaGetLastError(); err = "native embedding: read-only ROM device alias failed"; return false;
+    }
+    if (cudaDeviceSynchronize() != cudaSuccess) { err = "embedding ROM adoption must drain GPU readers"; return false; }
+    if (cudaFreeHost(host_) != cudaSuccess) { err = "embedding old host allocation release failed"; return false; }
+    host_ = const_cast<uint8_t*>(p); dev_ = alias; rom_ = std::move(rom); return true;
 }
 
 bool NativeEmbed::load(const std::vector<std::string>& shards, int64_t n_embd, int64_t n_vocab, std::string& err) {

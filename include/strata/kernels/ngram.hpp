@@ -24,6 +24,8 @@
 
 #include <cstdint>
 #include <string>
+#include <array>
+#include <memory>
 
 namespace strata::kernels {
 
@@ -166,7 +168,23 @@ struct PleIoOptions {
 /// The PLE table.  Held by pointer-to-impl so this header does not drag `<windows.h>` into every
 /// translation unit that wants the hash.
 class PleTable {
+    struct TableOwner;
 public:
+    // Stable scratch/ticket per caller. Pending I/O retains the one backing owner.
+    class Request {
+        friend class PleTable;
+    public:
+        Request() = default;
+        ~Request();
+        Request(const Request&) = delete;
+        Request& operator=(const Request&) = delete;
+    private:
+        std::shared_ptr<TableOwner> owner_;
+        std::array<uint32_t,PLE_N_HEADS> rows_{};
+        std::array<uint8_t,PLE_N_HEADS*PLE_ROW_BYTES_MAX> raw_{};
+        uint32_t ticket_ = 0;
+        bool pending_ = false;
+    };
     PleTable();
     ~PleTable();
     PleTable(const PleTable&) = delete;
@@ -179,6 +197,11 @@ public:
     /// needs the rows. `gather` is `issue` followed by `collect`. In Mmap mode `issue` only prefetches.
     bool issue(const uint32_t* rows16);
     bool collect(float* out2560, std::string& err);
+    bool issue(Request& request, const uint32_t* rows16);
+    bool collect(Request& request, float* out2560, std::string& err);
+    uintptr_t owner_identity() const;
+    uint64_t cache_capacity_bytes() const;
+    bool single_owner_mode() const;
     /// Non-blocking prefetch of 16 rows for one token into the reader's row cache while the GPU is busy.
     void prefetch_rows(const uint32_t* rows16);
     void wait_prefetches();
@@ -220,8 +243,7 @@ public:
     PleIo mode() const;
 
 private:
-    struct Impl;
-    Impl* impl_ = nullptr;
+    std::shared_ptr<TableOwner> impl_;
 };
 
 // ================================ THE PLE GATHER'S PREFETCH, AND ITS A/B ARM ================================

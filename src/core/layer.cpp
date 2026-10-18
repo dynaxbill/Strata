@@ -1451,13 +1451,21 @@ bool ple_issue_token(const PleRun& p, std::string& err) {
     if (!p.ready()) { err = "ple_issue_token: the PLE run is not ready"; return false; }
     uint32_t rows[strata::kernels::PLE_N_HEADS];
     strata::kernels::ngram_rows(p.token, p.prev, 1, p.consts, rows);
-    if (!p.table->issue(rows)) { err = "ple_issue_token: the previous token's rows were never collected"; return false; }
+    bool issued = false;
+    if (p.table->single_owner_mode()) {
+        if (!p.request_state.request) p.request_state.request = std::make_unique<strata::kernels::PleTable::Request>();
+        issued = p.table->issue(*p.request_state.request,rows);
+    } else issued = p.table->issue(rows);
+    if (!issued) { err = "ple_issue_token: the previous token's rows were never collected"; return false; }
     return true;
 }
 
 bool ple_finish_token(const PleRun& p, void* stream, std::string& err) {
     if (!p.ready()) { err = "ple_finish_token: the PLE run is not ready"; return false; }
-    if (!p.table->collect(p.emb_host, err)) { err = "ple_finish_token: " + err; return false; }
+    const bool collected = p.table->single_owner_mode()
+        ? p.request_state.request && p.table->collect(*p.request_state.request,p.emb_host,err)
+        : p.table->collect(p.emb_host,err);
+    if (!collected) { err = "ple_finish_token: " + err; return false; }
     if (cudaMemcpyAsync(p.emb_dev, p.emb_host, (size_t) strata::kernels::NG_N_EMBD * sizeof(float),
                         cudaMemcpyHostToDevice, (cudaStream_t) stream) != cudaSuccess) {
         err = "ple_finish_token: the row upload failed";

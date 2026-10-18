@@ -50,6 +50,7 @@ struct ExpertJob {
     float* out = nullptr;            ///< H floats, written by exactly one worker
     float weight = 1.0f;             ///< the router weight; applied by the HOST, not here
     int slot = -1;                   ///< the job's index, for diagnostics
+    const uint8_t* socket_blobs[2] = {}; ///< P0 opt-in, equal bytes, local pointer chosen by the executing worker
 };
 
 /// Plan v0.3 P6: one expert for the `nt` tokens of a verify window that were routed to it.  Every token's output
@@ -61,6 +62,7 @@ struct ExpertJobMulti {
     float* out[MAXT] = {};
     /// Plan v0.3 P6: a native pack's activations (the layer's `vec_dot_type`), one per token.
     const void* nact[MAXT] = {};
+    const uint8_t* socket_blobs[2] = {};
 };
 
 /// How worker threads are allocated across physical/logical CPU cores (#272).  `All` is the layout the pool has

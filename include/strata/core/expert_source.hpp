@@ -26,6 +26,7 @@
 #include "strata/core/exchange_storage.hpp"
 #include "strata/core/hit_hook.hpp"
 #include "strata/kernels/cpu/pool.hpp"
+#include "strata/platform/socket_rom.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -48,6 +49,7 @@ namespace strata::core {
 
 class PeerExperts;   // multi-GPU: the second GPU's expert tier (peer_experts.hpp)
 class RemoteExperts;
+class NativeEmbed;
 struct LoadStats;
 
 namespace detail {
@@ -167,6 +169,7 @@ public:
     /// immediately and nothing is retained.  A CACHING source must return pointers into the cache, not into a
     /// reused staging buffer - otherwise the pool would read the next expert's bytes while computing this one.
     virtual const uint8_t* blob(int64_t layer, int64_t expert) = 0;
+    virtual void socket_blobs(int64_t, int64_t, const uint8_t* (&out)[2]) const { out[0] = out[1] = nullptr; }
     /// A blob pointer that stays valid (not recycled) for as long as the source is open: for a copy that runs
     /// asynchronously long after the call (the adaptive tier's swap-ins).  Defaults to `blob`.
     virtual const uint8_t* blob_stable(int64_t layer, int64_t expert) { return blob(layer, expert); }
@@ -530,6 +533,9 @@ public:
     ~FileExpertSource() override;
     FileExpertSource(const FileExpertSource&) = delete;
     FileExpertSource& operator=(const FileExpertSource&) = delete;
+    bool enable_full_rom(NativeEmbed& embedding, std::string& err);
+    bool full_rom() const { return full_rom_ && full_rom_->ready(); }
+    void socket_blobs(int64_t layer, int64_t expert, const uint8_t* (&out)[2]) const override;
 
     /// Maps `<pack_dir>/experts.bin` and checks its size against the loaded expert layout.  Canonical packs use
     /// `n_layers * n_expert * BLOB`; native packs use their variable per-layer blob sizes and offsets.
@@ -752,6 +758,9 @@ public:
 
 private:
     const uint8_t* resident_blob(size_t index) const;
+    std::shared_ptr<strata::platform::SocketRom> full_rom_;
+    const uint8_t* full_rom_device_[2] = {};
+    std::vector<unsigned> full_rom_roles_;
     const uint8_t* mapped_blob(int64_t layer, int64_t expert) const;
     /// The blob's bytes from the mapped file(s) - experts.bin, or the three GGUF role slices - into `dst`.
     bool copy_from_files(int64_t layer, int64_t expert, uint8_t* dst) const;
@@ -921,6 +930,11 @@ private:
 // Phase 3's cache fills and the CPU/PCIe miss split - but registration is best-effort and reported, not assumed.
 class ArenaExpertSource : public ExpertSource {
 public:
+    bool enable_full_rom(const std::string& pack, const std::string& native, NativeEmbed& embedding, std::string& err);
+    bool full_rom() const { return full_source_ && full_source_->full_rom(); }
+    void socket_blobs(int64_t layer,int64_t expert,const uint8_t* (&out)[2]) const override {
+        if(full_source_)full_source_->socket_blobs(layer,expert,out);else out[0]=out[1]=nullptr;
+    }
     ArenaExpertSource() = default;
     ~ArenaExpertSource() override;
     ArenaExpertSource(const ArenaExpertSource&) = delete;
@@ -978,6 +992,7 @@ public:
 
 private:
     void* arena_ = nullptr;          ///< the PinnedArena, owned
+    std::unique_ptr<FileExpertSource> full_source_;
     void* map_ = nullptr;            ///< STRATA_ARENA_MMAP: the arena file, mapped read-only (not the PinnedArena)
     uint64_t map_bytes_ = 0;
     std::vector<const uint8_t*> dev_slice_;   ///< device alias of each registered slice (or of the whole range)

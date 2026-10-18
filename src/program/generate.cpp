@@ -1881,6 +1881,11 @@ int main(int argc, char** argv) {
     }
 #endif
     Options o;
+    { std::string rom_error;
+      if (!strata::platform::socket_rom_config_valid(rom_error)) {
+          std::fprintf(stderr,"P0 configuration refused: %s\n",rom_error.c_str()); return 2;
+      }
+    }
     bool have_tokens = false;
     bool have_logits_stride = false;
     for (int i = 1; i < argc; ++i) {
@@ -4898,6 +4903,10 @@ int main(int argc, char** argv) {
             src.set_io_stats(true);
         }
         srcp = &src;
+        if (strata::platform::socket_rom_requested()) {
+            if (!src.enable_full_rom(native_embed,err))
+                std::fprintf(stderr,"P0 FULL FALLBACK: %s; original source retained\n",err.c_str());
+        }
     } else {
         arena_src.set_gguf(o.native_preset);   // plan v0.3 P6: a native pack may take its experts from shard 1
         // Under WDDM (Windows, WSL2), a multi-GPU run (a layer split, or remote experts) starts with at most 8 GiB of
@@ -5030,6 +5039,10 @@ int main(int argc, char** argv) {
         }
 #endif
         srcp = &arena_src;
+        if (strata::platform::socket_rom_requested()) {
+            if (!arena_src.enable_full_rom(o.pack,o.native_preset,native_embed,err))
+                std::fprintf(stderr,"P0 FULL FALLBACK: %s; original arena retained\n",err.c_str());
+        }
     }
 #if defined(__linux__)
     // 0.1.43.1: on by default (STRATA_ADAPT_CALLBACK_WARMUP=0 turns it off).  Linux threads inherit the creator's CPU mask, and
@@ -7010,7 +7023,7 @@ int main(int argc, char** argv) {
                                  "streamed ring %d slots\n", 100.0 * res_share, ring);
         }
     };
-    if (o.resident_cpu_experts) {
+    if (o.resident_cpu_experts && !src.full_rom()) {
         int64_t lend_from = -1;
         if (o.prefill_chunk > 0 && !o.no_prefill_borrow && d_res != nullptr && xcache.slots() > 0) {
             int64_t chunk = o.prefill_chunk;
