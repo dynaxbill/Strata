@@ -4587,7 +4587,26 @@ bool ArenaExpertSource::enable_full_rom(const std::string& pack,const std::strin
     if(full_source_||!base_||n_expert_<=0||blobs_%n_expert_){err="FULL arena source is not initialized";return false;}
     const int64_t experts=n_expert_,layers=blobs_/n_expert_;
     auto candidate=std::make_unique<FileExpertSource>();candidate->set_gguf(native);
-    if(!candidate->open(pack,layers,experts,err)||!candidate->enable_full_rom(embedding,err))return false;
+    if(!candidate->open(pack,layers,experts,err))return false;
+    // The baseline cache was filled from this live arena. Verify every original
+    // blob against the new assembler before replacing that source, not only
+    // against an independently opened GGUF or one cache slot.
+    const auto& layout=strata::kernels::cpu::expert_layout();
+    std::vector<uint8_t> check((size_t)layout.max_blob);
+    for(int64_t l=0;l<layers;++l)for(int64_t e=0;e<experts;++e){
+        const auto* original=blob(l,e);const size_t bytes=(size_t)layout.blob_bytes(l);
+        if(!original||!candidate->copy_blob(l,e,check.data())||std::memcmp(original,check.data(),bytes)){
+            err="FULL original-arena byte mismatch at layer="+std::to_string(l)+" expert="+std::to_string(e);return false;
+        }
+    }
+    std::fprintf(stderr,"P0 original arena source parity: %lld expert blobs bitwise identical\n",(long long)(layers*experts));
+    int old=-1,devices=0;(void)cudaGetDevice(&old);
+    if(cudaGetDeviceCount(&devices)!=cudaSuccess){err="FULL source handoff cannot enumerate DMA readers";return false;}
+    for(int d=0;d<devices;++d)if(cudaSetDevice(d)!=cudaSuccess||cudaDeviceSynchronize()!=cudaSuccess){
+        if(old>=0)(void)cudaSetDevice(old);err="FULL source handoff cannot drain cache-fill DMA";return false;
+    }
+    if(old>=0)(void)cudaSetDevice(old);
+    if(!candidate->enable_full_rom(embedding,err))return false;
     // No expert reader/cache has been published yet. Drop the old resident arena,
     // retaining the exact ArenaExpertSource identity used by upstream routing.
     close();
