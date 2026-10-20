@@ -1,0 +1,10 @@
+{
+  "rc": 0,
+  "report": {
+    "status": "GPU_GRAPH_COPY_CANARIES_AND_OVERFLOW_ALIASES_EXACT",
+    "checks": 264,
+    "devices": 2,
+    "model_used": false
+  },
+  "status": "BOTH_GPUS_MEMORY_COPY_GRAPH_EXACT"
+}

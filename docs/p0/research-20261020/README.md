@@ -1,15 +1,15 @@
 # P0 dual-socket ROM research — 2026-10-20
 
-**Research archive, NOT_PROMOTED.** The later four-client latency remedy passes its original 3% gate, but latest C2 still fails the original fixed envelope: ON and OFF each have 8/144 outside rows. C3 functional checks pass; exact replay of the earlier refusal with the same native protocol and complete pre-state is not established.
+**Research archive, NOT_PROMOTED.** The latest follow-up establishes the Chinese C2 first cause with an isolated E449 backend ablation and exact CPU/GPU witnesses. A new bounded PCIe-spill candidate passes the unchanged original C2 envelope and clean C4+3% gate, but whole-VM zero-swap fails and final C3/512K/soak qualifications remain incomplete.
 
-本分支保存 P0 的實作、後續根因定位與失敗。最新 C4 關閉 slot verifier 後改善約 9.3%；C2 仍 FAIL，原拒答未精確重建，不能視為 production 放行。
+最新：C2首差因果與新候選數值／C4通過；原FAIL保留，全VM資源gate仍FAIL，不promotion。請先讀[完整新結果與限制](FOLLOWUP.md)和[當前矩陣](VALIDATION-LATEST.md)。下列舊資料均保留為其原配置的歷史證據。
 
 ## Read the results
 
-- [Validation matrix](VALIDATION.md): Passed, Failed, Not run and remaining work.
+- [Current validation matrix](VALIDATION-LATEST.md) and [historical matrix](VALIDATION.md): Passed, Failed, Not run and remaining work.
 - [Research history](HISTORY.md): separates historical configurations and all failed gates.
 - [Numerical requirements](NUMERICAL-PARITY.md): zero ROM/fixed-CPU error, fixed B0 envelope, margins and functional checks.
-- [Latest detailed report, Traditional Chinese](reports/20261020-c4-singlefactor.zh-TW.md).
+- [Earlier VERIFY ON/OFF report, Traditional Chinese](reports/20261020-c4-singlefactor.zh-TW.md).
 - [C2 first internal difference](reports/20261019-c2-firstdiff.zh-TW.md).
 - [C3 exact CPU/GPU witness](reports/20261020-e131-exact.zh-TW.md).
 - [Earlier qualification and actual 512K recall](reports/20261020-qualification.zh-TW.md).

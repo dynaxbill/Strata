@@ -1,3 +1,5 @@
+> Historical export description follows. New experiments and private archive digests are separately identified in [FOLLOWUP.md](FOLLOWUP.md) and [the follow-up ledger](data/evidence-ledger-followup.json).
+
 # Evidence, provenance and public data
 
 ## Public material

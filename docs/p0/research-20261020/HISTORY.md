@@ -23,3 +23,7 @@ The original 30.825 ms/token failure cannot be retrospectively explained solely 
 Historical calibration from five earlier B0 starts is a distinct experiment. It is not added to the later frozen nine-vector envelope and cannot turn its failures into passes. Interrupted/failed runs remain separate from valid measurements.
 
 The original hypervisor fault records are retained privately. This work neither clears them nor establishes the cause of that fault.
+
+## Later 2026-10-20 follow-up
+
+The original first40-head match and Chinese8-row FAIL now have actual trace/strict micro/isolated E449 causality. A new memory-only spill candidate passes the same original fixed9 envelope and cleanC4 gate; whole-VM swap I/O still fails. See[the follow-up](FOLLOWUP.md). No old gate is rewritten and no production promotion occurs.

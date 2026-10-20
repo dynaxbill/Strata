@@ -1,3 +1,5 @@
+> Historical matrix from the previous publication. New evidence is in [VALIDATION-LATEST.md](VALIDATION-LATEST.md) and [FOLLOWUP.md](FOLLOWUP.md); historical FAILs below are not reclassified.
+
 # Validation matrix
 
 Latest disposition: **NOT_PROMOTED**. These are different gates; passing one does not waive another.
