@@ -1,0 +1,36 @@
+{
+  "source_archive_sha256": "6d25ce8e69eb4064b954b73c8806004e8d46daacefe272ad3836349d48630326",
+  "files": 73,
+  "micro": {
+    "layer": 0,
+    "expert": 131,
+    "gu_type": "iq3_xxs",
+    "down_type": "iq4_nl",
+    "n_embd": 2560,
+    "n_ff": 640,
+    "mt_min": 1,
+    "cpu_activation_type": "q8_K",
+    "cpu_hidden_type": "q8_0",
+    "gpu_activation_type": "q8_1",
+    "cpu_repeat_bitwise": true,
+    "CPU_TRACE_BITWISE": true,
+    "GPU_used": true,
+    "GPU_TRACE_BITWISE": true,
+    "gpu_repeat_bitwise": true,
+    "gpu_weight_copy_bitwise": true,
+    "GPU_cap": 60,
+    "GPU_input_rows": 6,
+    "GPU_target_row": 0,
+    "GPU_PCIE_group_count": 4,
+    "GPU_gy": 4,
+    "maxabs": 0.0033283382654190063,
+    "RMS": 0.0003100228662314995
+  },
+  "CPU_GPU_gap_from_original_inputs": {
+    "maxabs": 0.0033283382654190063,
+    "RMS": 0.0003100228662314996,
+    "nonzero": 2560
+  },
+  "no_numerical_tolerance_added": true,
+  "original_FAIL_retained": true
+}

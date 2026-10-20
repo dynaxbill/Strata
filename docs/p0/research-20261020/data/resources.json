@@ -1,0 +1,9 @@
+{
+  "samples": 1135,
+  "monitor_errors": [],
+  "model_cgroup_swap_max_bytes": 0,
+  "oom_counter_max": 0,
+  "oom_kill_counter_max": 0,
+  "whole_VM_zero_swap_claim": false,
+  "scope": "Per-phase vmstat deltas and model cgroup samples retained separately. Model zero swap does not imply whole VM zero swap."
+}

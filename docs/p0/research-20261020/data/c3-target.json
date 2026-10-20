@@ -1,0 +1,45 @@
+{
+  "target_input_sha256": "7998199aa7affc766a57d64c48d507c38540252455d86b6886be1efb9a5483b1",
+  "same_native_protocol": false,
+  "exact_same_protocol_replay_gate": "NOT_SATISFIED",
+  "comparison": {
+    "bitwise": true,
+    "maxabs": 0.0,
+    "RMS": 0.0,
+    "new_top1": false,
+    "status": "DIAGNOSTIC_ONLY_PROTOCOL_DIFFERS"
+  },
+  "phases": {
+    "B0_prior": {
+      "archive_sha256": "31484db44124a4e2744202e1d14365443c7213be07b33033e050f912c64c7b0a",
+      "header": [
+        "BGEN",
+        "3",
+        "128",
+        "top_p=0.9",
+        "top_k=30",
+        "seed=1337"
+      ],
+      "native_tokens": 4129,
+      "input_sha256": "7998199aa7affc766a57d64c48d507c38540252455d86b6886be1efb9a5483b1",
+      "head_sha256": "a89b710d19f6875881f038dda2750cecf6427d268f6b11d5501ffba39e2332f1",
+      "top1": 50,
+      "margin": 0.44562339782714844
+    },
+    "P0_OFF": {
+      "archive_sha256": "fe4009ea788265abeb3523f064a0571a22269584bd17bfda1454058b87ab7495",
+      "header": [
+        "GEN",
+        "128",
+        "top_p=0.9",
+        "top_k=30",
+        "seed=1337"
+      ],
+      "native_tokens": 4129,
+      "input_sha256": "7998199aa7affc766a57d64c48d507c38540252455d86b6886be1efb9a5483b1",
+      "head_sha256": "a89b710d19f6875881f038dda2750cecf6427d268f6b11d5501ffba39e2332f1",
+      "top1": 50,
+      "margin": 0.44562339782714844
+    }
+  }
+}

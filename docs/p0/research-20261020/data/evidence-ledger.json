@@ -1,0 +1,77 @@
+{
+  "private_raw_not_uploaded": true,
+  "archives": [
+    {
+      "label": "C2 first-difference R2",
+      "source_archive_sha256": "e5e3c707da4519041dad20ede7e98640ed9fdcb38cd4d0c69d17895dee9d8506",
+      "files": 3875,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "9338b89eb49fb8556aaa18e7d6e38c01344a0fb20961c3e6dc47890bc00b4d28",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "C2 CPU expert255 witness",
+      "source_archive_sha256": "37577532ba46559270d9db275ed71c1a7bbbff4d8d9fa1ee1a9862be10ba3dbd",
+      "files": 129,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "52de674a6c32a9f4cc655f296a7f6663576d0585d472068a662a6fc82ce07716",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "C3 E131 exact",
+      "source_archive_sha256": "6d25ce8e69eb4064b954b73c8806004e8d46daacefe272ad3836349d48630326",
+      "files": 73,
+      "recorded_verification_status": "LOCAL_EVERY_FILE_CRC_SHA_AND_ZIP_SHA_PASS",
+      "source_receipt_sha256": "f8bd32d3f40c34b7a46e8f4fddfe4a84823082c98b6fb63594d06bd04726c217",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "Earlier qualification including FAIL",
+      "source_archive_sha256": "12fb304ea78e8ad98933831b72dd8ec01aee9122d8b3ce85ac2306e55cf7ac46",
+      "files": 2045,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "2e041b314d01a16cb99a36feb548898ff152460000d5198bf8c3ce5c980aca04",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "C1/C3 continuation including fixture failure",
+      "source_archive_sha256": "31484db44124a4e2744202e1d14365443c7213be07b33033e050f912c64c7b0a",
+      "files": 869,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "ef169aed4c15f67114ae5a09a59d32ccd42d12670aebc198b8b0044ca17d458c",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "CPU 512K fingerprint preflight FAIL",
+      "source_archive_sha256": "6c9f119508b31d9b615006a0226dde2c66f00b55a98509a7a7feb85d993665b0",
+      "files": 78,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "90870292d2806acb8f1f71360ff9b0e96300adea7afc07614ffc4b1f8ed968d4",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "Actual 512K two profiles",
+      "source_archive_sha256": "7710d8fa62a14c15c86a331980e19f0d56d3a856e2d945681c649e1e226a053d",
+      "files": 135,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "6d418b7567b82dd4bbea6377497d0d170e7419a5f8d96d0b2142ca7117782328",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    },
+    {
+      "label": "Latest C4 single-factor",
+      "source_archive_sha256": "fe4009ea788265abeb3523f064a0571a22269584bd17bfda1454058b87ab7495",
+      "files": 2101,
+      "recorded_verification_status": "ZIP_SHA_CRC_ALL_MANIFEST_FILES_VERIFIED",
+      "source_receipt_sha256": "8c43ee4533e6b8f6a1df38f6355975b746c27ad23b0211ec1ea590017992dcb2",
+      "public_raw_available": false,
+      "publication_scope": "Existing independent verification receipt re-read; not a new GPU run. Raw stays private."
+    }
+  ]
+}

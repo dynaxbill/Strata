@@ -1,3 +1,5 @@
+> **Research update, 2026-10-20:** [latest evidence, source overlay and retained failures](research-20261020/README.md). Latest C4 VERIFY-OFF passes its original performance gate, but C2 still fails 8/144 against the unchanged fixed envelope and exact refusal protocol replay is incomplete. No promotion. The text below records the original implementation and historical calibration; it does not expand any later envelope.
+
 # P0 FULL implementation and qualification
 
 This opt-in Linux candidate mirrors every persistent host weight in the audited model scope. It allocates two private anonymous images, binds and fills each on its socket, verifies SHA256, locks and registers the images, protects them read-only, and checks all guest pages before publishing pointers. CPU jobs choose their worker socket's mirror; GPU cache routing and arithmetic retain their existing order. The persistent mapped embedding shares the ROM owner. Runtime reload and COMPLEMENT are rejected.

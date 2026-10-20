@@ -1,0 +1,28 @@
+{
+  "source_archive_sha256": "fe4009ea788265abeb3523f064a0571a22269584bd17bfda1454058b87ab7495",
+  "suite_status": "PASS",
+  "cases": [
+    {
+      "case": "precondition",
+      "rc": 0
+    },
+    {
+      "case": "history20",
+      "rc": 0
+    },
+    {
+      "case": "api9",
+      "rc": 0
+    },
+    {
+      "case": "coding8",
+      "rc": 0
+    },
+    {
+      "case": "input_audit",
+      "rc": 0
+    }
+  ],
+  "full_functional_gate_pass": true,
+  "same_protocol_refusal_replay": "NOT_SATISFIED"
+}
