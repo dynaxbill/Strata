@@ -1,0 +1,31 @@
+{
+  "scope": "CPU UCRT fmaf replay, first product separately rounded, ranks1..9 ordered FMA, shared rounded add; dedicated actual GPU parts+valid GPU hit mask only. No approximate comparison.",
+  "archive": "52b5a9c7f2423dd94261fdd47b3e50ccc6f8d56595199fc76f8576c8d1c3497a",
+  "source": {
+    "path": "src/kernels/cuda/native_moe.cu",
+    "sha256": "ed63f56561673e0ad00fd830b75a4dc912d1963d781a43db566932cb2caa9b6e"
+  },
+  "cases": {
+    "129_P0_old_E449_witness": {
+      "complete_combined_bitwise": true,
+      "maxabs": 0.0,
+      "hits_in_combine": false,
+      "GPU_owned_parts_nonzero_before_fused_hit_add": null
+    },
+    "130_P0_new_E449_witness": {
+      "complete_combined_bitwise": true,
+      "maxabs": 0.0,
+      "hits_in_combine": false,
+      "GPU_owned_parts_nonzero_before_fused_hit_add": null
+    }
+  },
+  "different_actual_combine_input_entries": [
+    55
+  ],
+  "only_E449_substituted_in_offline_ordered_formula": {
+    "complete_combined_bitwise_new": true,
+    "maxabs_to_new": 0.0,
+    "scope": "CPU formula counterfactual only; no model output was replaced in either GPU controller."
+  },
+  "exact_frontier_formula_causal_witness": true
+}

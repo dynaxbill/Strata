@@ -1,0 +1,4 @@
+source/*.patch -text -whitespace
+source/*.cpp -text
+data/*.json -text
+fixtures/*.json -text

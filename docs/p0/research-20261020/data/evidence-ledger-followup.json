@@ -1,0 +1,63 @@
+{
+  "historical_ledger": "evidence-ledger.json",
+  "entries": [
+    {
+      "role": "Original B0 runtime missing build cache; before drain",
+      "archive": "p0-c2cn12-build-fail-evidence-20261020T053250Z-3f5343d3.zip",
+      "sha256": "9f8b32459d9d49b4ca95b2bd4031fcaaac595579832c0aa431a01aa577f94a8d",
+      "bytes": 157986,
+      "files": 77,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Completed first five cases then raw cap FAIL; all kept",
+      "archive": "p0-c2cn13-evidence-20261020T054046Z-d1b1d058.zip",
+      "sha256": "f0a4d0c963f6d6dd64d9248dbd48bdffb6bffeb6f98ab8cc222d51a42f200fd2",
+      "bytes": 1583291280,
+      "files": 6598,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Remaining three trace controls",
+      "archive": "p0-c2cn14-evidence-20261020T061949Z-12ac1278.zip",
+      "sha256": "0a3b3bb66a87f6a2341971936ef557de31f9833a54c859dd3178cc110cf027f3",
+      "bytes": 1037494564,
+      "files": 16442,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Generated C++ diagnostic literal compile FAIL; before drain",
+      "archive": "p0-c2cn15-build-fail-evidence-20261020T064702Z-9beb9136.zip",
+      "sha256": "a032f152801523fb27642c5e801438c2031c521e2d283c5d936aa1e0711a3cdd",
+      "bytes": 201870,
+      "files": 79,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Actual E449 output; quota-freeing ablation also moved E342, causal flags false",
+      "archive": "p0-c2cn16-evidence-20261020T064958Z-0109e104.zip",
+      "sha256": "52b5a9c7f2423dd94261fdd47b3e50ccc6f8d56595199fc76f8576c8d1c3497a",
+      "bytes": 1044281829,
+      "files": 16472,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Actual exact micro and quota-reserved single-expert causal proof",
+      "archive": "p0-c2cn17-evidence-20261020T070836Z-17ccd113.zip",
+      "sha256": "d3ee16884b9897f68f52e18ee0e5079e9d09b833e8dd9b307300bddeafa40cf5",
+      "bytes": 209156055,
+      "files": 10732,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    },
+    {
+      "role": "Seven-phase memory-copy/C2/C4 candidate; resource FAIL retained",
+      "archive": "p0-c2cn18-evidence-20261020T073107Z-9d75608d.zip",
+      "sha256": "5ac6cc064b59607a8fb904c549b2d46529b0f5498baa91c0c36a99eb66b1ccd9",
+      "bytes": 400836622,
+      "files": 1324,
+      "whole_ZIP_and_every_member_CRC_SHA_verified": true
+    }
+  ],
+  "all_failures_retained": true,
+  "no_raw_weights_activations_logits_or_private_control_files_published": true
+}

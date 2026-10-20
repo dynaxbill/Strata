@@ -554,6 +554,12 @@ bool lm_head_mix(const WeightTable& tables, const ModelGeometry& g, const BlockB
 // canonical pack.  It is also why the PLE is cheap: sixteen 90-byte rows per token is 1440 bytes of traffic,
 // against the experts' 664 MB.
 struct PleRun {
+    struct RequestState {
+        mutable std::unique_ptr<strata::kernels::PleTable::Request> request;
+        RequestState() = default;
+        RequestState(const RequestState&) {} // copying a session never copies a pending ticket
+        RequestState& operator=(const RequestState&) { request.reset(); return *this; }
+    } request_state;
     /// Null when the PLE is not wired (no table, or a pack without `blk.1.ple_*`).  Then `block_layer_pre`
     /// SKIPS the module entirely, which is what every measurement before this change did.
     strata::kernels::PleTable* table = nullptr;

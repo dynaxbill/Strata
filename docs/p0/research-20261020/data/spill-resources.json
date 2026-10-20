@@ -1,0 +1,103 @@
+{
+  "archive": "5ac6cc064b59607a8fb904c549b2d46529b0f5498baa91c0c36a99eb66b1ccd9",
+  "scope": "Finite monitored GPU window; loading/inference/restore samples, not a universal resource guarantee",
+  "phases": {
+    "136_C2_B0_spill_ON": {
+      "vmstat_delta": {
+        "pswpin": 154,
+        "pswpout": 0,
+        "pgmajfault": 107,
+        "numa_pages_migrated": 4471
+      },
+      "same_native_pid": true
+    },
+    "137_C2_P0_spill_ON": {
+      "vmstat_delta": {
+        "pswpin": 87,
+        "pswpout": 309,
+        "pgmajfault": 37,
+        "numa_pages_migrated": 533
+      },
+      "same_native_pid": true
+    },
+    "138_C2_P0_spill_POOL_observer": {
+      "vmstat_delta": {
+        "pswpin": 0,
+        "pswpout": 0,
+        "pgmajfault": 0,
+        "numa_pages_migrated": 15902
+      },
+      "same_native_pid": true
+    },
+    "139_C4_B0_spill_before": {
+      "vmstat_delta": {
+        "pswpin": 96,
+        "pswpout": 0,
+        "pgmajfault": 77,
+        "numa_pages_migrated": 9616
+      },
+      "same_native_pid": true
+    },
+    "140_C4_P0_spill": {
+      "vmstat_delta": {
+        "pswpin": 5,
+        "pswpout": 0,
+        "pgmajfault": 4,
+        "numa_pages_migrated": 8638
+      },
+      "same_native_pid": true
+    },
+    "141_C4_B0_spill_after": {
+      "vmstat_delta": {
+        "pswpin": 2,
+        "pswpout": 0,
+        "pgmajfault": 2,
+        "numa_pages_migrated": 8094
+      },
+      "same_native_pid": true
+    }
+  },
+  "samples": 556,
+  "native_samples": 1060,
+  "native_VmSwap_max_KiB": 0,
+  "model_cgroup_swap_max_bytes": 0,
+  "model_cgroup_OOM_max": {
+    "oom": 0,
+    "oom_kill": 0,
+    "oom_group_kill": 0
+  },
+  "whole_VM_swap_IO_monitored_span": {
+    "pswpin": 7166,
+    "pswpout": 7254
+  },
+  "whole_VM_swap_occupancy": "NOT_RECORDED_CONTINUOUSLY; zero IO or cgroup swap does not prove whole-VM swap-used0",
+  "node_MemFree_min_KiB": {
+    "node0": {
+      "minimum": 4126372,
+      "total": 197771500,
+      "conservative_reserve_KiB": 19777150,
+      "minimum_exceeds_reserve": false
+    },
+    "node1": {
+      "minimum": 34534280,
+      "total": 193921644,
+      "conservative_reserve_KiB": 19392164,
+      "minimum_exceeds_reserve": true
+    }
+  },
+  "physical_host_census": "NOT_RUN; original sampled PFN evidence not transferred",
+  "post_workload_all_ROM_span_rehash": "NOT_ASSERTED_FROM_STARTUP_ONLY_REPORT",
+  "observer_cgroup_note": {
+    "memory_max_bytes": 268435456,
+    "swap_current_observed_bytes": 459898880,
+    "VM_MemAvailable_observed_KiB": 250098240,
+    "after_experiments_20s": {
+      "VM_swapin": 2867,
+      "VM_swapout": 2485,
+      "observer_swapin": 2633,
+      "observer_swapout": 2485,
+      "observer_memory_max_events": 38
+    },
+    "scope": "Read-only snapshot and 20-second counters, no new P0 workload; not proof of every historical swap event or of a particular Python/native allocation leak. Shared observer not modified."
+  }
+}

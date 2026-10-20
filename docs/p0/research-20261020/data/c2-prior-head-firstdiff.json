@@ -1,0 +1,84 @@
+{
+  "status": "BOUNDED_CPU_ONLY_FIRST_OBSERVABLE_HEAD_DIFF_NOT_INTERNAL_ROOT_CAUSE",
+  "total": 144,
+  "changed_vs_prior_P0_ON": [
+    {
+      "zero_based_ordinal": 40,
+      "key": "P0-C2:chinese:0",
+      "repeat": 0,
+      "old_sha": "b01977f827aebcdcabf00718eb705ce12529e5611c9f0a1a8d5747b4a0e9a2ef",
+      "new_sha": "10db65373503545cb622719c0b5a1bda7bd9601cef585bd73e84dc979abe746f",
+      "input_sha256": "ba4da394d43bd05e57619a842d4c5d1169164b88161eb7a0b9a9b00745597271"
+    },
+    {
+      "zero_based_ordinal": 41,
+      "key": "P0-C2:chinese:1",
+      "repeat": 0,
+      "old_sha": "38744c332c1b43302af5062cf4a52d6f9a9b66ee286479a2b27ecf1064f203a5",
+      "new_sha": "3c40530d2bb2341b2ca500ed458ae128e58aef013ee5a74f08af1b86e05a0f9d",
+      "input_sha256": "3dc9b4ad1d56961db241124437c77cf704f0496124e60419cdb73c78634a4f30"
+    },
+    {
+      "zero_based_ordinal": 42,
+      "key": "P0-C2:chinese:2",
+      "repeat": 0,
+      "old_sha": "d10b300e9eee5287b97df33f42b64ec15e74aa8202cd3f3218253ec3987cb3be",
+      "new_sha": "a34cf90d97b06e8ceea86a7d0569e2b9bbe6b6ada957cb1f6a7910f1bcc3bb44",
+      "input_sha256": "f46b77183aac2c69ba8da795c9bd88ac6bf4392a268d7d2fee187b38a1654f91"
+    },
+    {
+      "zero_based_ordinal": 43,
+      "key": "P0-C2:chinese:4",
+      "repeat": 0,
+      "old_sha": "da9d9ce3500213259aa3cc8438e795f402f3b54f8c22d534dda6275b2016f298",
+      "new_sha": "2d1f49d28f66a6089d58413ca4ae8c7361267cef13c4a8881eb91c015b347cc8",
+      "input_sha256": "c8af99ea7deaec42d386f55f06c66348b900630a29542d95050942eda728b824"
+    },
+    {
+      "zero_based_ordinal": 44,
+      "key": "P0-C2:chinese:8",
+      "repeat": 0,
+      "old_sha": "f9ef22d13715537e88658ca41bf4840d0228f12496d96fff7ed04be3619e22a2",
+      "new_sha": "ed191a80c8bf55ab647fc7b5c135a5ee1ce5985f8a2937f7bf5b9f33e1f38949",
+      "input_sha256": "938da416e9bff1561459d63c476a22c049082f02cdbb8b55bb8dff2c089ccd7d"
+    },
+    {
+      "zero_based_ordinal": 45,
+      "key": "P0-C2:chinese:16",
+      "repeat": 0,
+      "old_sha": "2fcf67642af2dcf5af49f7f6fc23beb2ea18691e704c9325a69d255aebb10660",
+      "new_sha": "690db65c840c8d4a08a894c132082dd227c8bb56b620febe224469f2d40c720f",
+      "input_sha256": "25764959ed85b6a8a1313b8070d7df0192a18a5630f0f7d653d361e17587126d"
+    },
+    {
+      "zero_based_ordinal": 46,
+      "key": "P0-C2:chinese:31",
+      "repeat": 0,
+      "old_sha": "6d6f91b9c11155c3c0e323e40f5c3f36e4ee820351e552068bfafd61a01801ca",
+      "new_sha": "74f3afb7c2607bbb6b309a91026a577db3383ed8e7a161ea3e2aedb332a05809",
+      "input_sha256": "ecd91caa94b39ba2de6591d5cd78a3309eb615da7b482ff155889182a92a783b"
+    },
+    {
+      "zero_based_ordinal": 47,
+      "key": "P0-C2:chinese:57",
+      "repeat": 0,
+      "old_sha": "8a49d6a6cd571561f2056e823b5254cc60e033192ab357f567b7bd8b274eca97",
+      "new_sha": "93749bc33c42a1a2c74782008e917ed69680f4a3e5cdc48956e69177a7683bd2",
+      "input_sha256": "efb45b374ae06f8440dbe432e89ada28ae83b065204faeb8d888826f838737bb"
+    }
+  ],
+  "earliest_observed": {
+    "zero_based_ordinal": 40,
+    "key": "P0-C2:chinese:0",
+    "repeat": 0,
+    "old_sha": "b01977f827aebcdcabf00718eb705ce12529e5611c9f0a1a8d5747b4a0e9a2ef",
+    "new_sha": "10db65373503545cb622719c0b5a1bda7bd9601cef585bd73e84dc979abe746f",
+    "input_sha256": "ba4da394d43bd05e57619a842d4c5d1169164b88161eb7a0b9a9b00745597271"
+  },
+  "effective_env_bitwise_equal": true,
+  "effective_env_equal": true,
+  "runtime_config_equal": true,
+  "original_gate_unchanged_FAIL": true,
+  "internal_state_witness": "NOT_CAPTURED_IN_THIS_PERFORMANCE_STUDY; pending/residency/GDN/KV/activations/backend plan not available to assign first internal cause",
+  "GPU_reruns": 0
+}

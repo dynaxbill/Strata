@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 #include <stdexcept>
+#include <mutex>
+#include <cstdlib>
 
 #if defined(_WIN32)
 // `PrefetchVirtualMemory` (memoryapi.h, Windows 8+) is the whole point of the change in `gather` below.
@@ -199,12 +201,13 @@ std::string ple_format_list() {
 
 static_assert(PLE_ROW_BYTES_MAX >= PLE_ROW_BYTES && PLE_ROW_BYTES_MAX >= PLE_ROW_BYTES_FP8, "row buffers too small");
 
-struct PleTable::Impl {
+struct PleTable::TableOwner {
+    bool single = false;
     GgufFile* file = nullptr;
     const uint8_t* data = nullptr;
     uint64_t n_rows = 0;
     const PleFormatInfo* fmt = &ple_format_info(PleFormat::IQ4_NL);   // the table's format (#296: Q5_0 is one of them)
-    mutable uint64_t bytes_read = 0;
+    mutable std::atomic<uint64_t> bytes_read{0};
     // Direct mode (plan v0.3 P2): the mapping above is released after the header parse and every row comes
     // from an unbuffered SSD read into `raw`.
     PleIo mode = PleIo::Mmap;
@@ -222,10 +225,42 @@ struct PleTable::Impl {
     float scale = 1.0f;               // the FP8 table's one scale
     uint32_t rb = PLE_ROW_BYTES;      // bytes per row
     void decode(const uint8_t* row, float* out160) const { fmt->dequant(row, scale, out160); }
+    ~TableOwner() {
+        std::string err;
+        for(size_t i=0;i<n_prefetch;++i)(void)reader.collect(prefetch_tickets[i],err);
+        if(pending&&mode==PleIo::Direct)(void)reader.collect(ticket,err);
+        reader.close();
+        delete file;
+    }
 };
 
-PleTable::PleTable() : impl_(new Impl) {}
-PleTable::~PleTable() { close(); delete impl_; }
+PleTable::PleTable() : impl_(std::make_shared<TableOwner>()) {}
+PleTable::~PleTable() = default;
+PleTable::Request::~Request() {
+    if(pending_&&owner_&&owner_->mode==PleIo::Direct){std::string err;(void)owner_->reader.collect({ticket_},err);}
+}
+uintptr_t PleTable::owner_identity() const { return reinterpret_cast<uintptr_t>(impl_.get()); }
+uint64_t PleTable::cache_capacity_bytes() const { return impl_->reader.cache_capacity()*(uint64_t)impl_->rb; }
+bool PleTable::single_owner_mode() const { return impl_->single; }
+
+bool PleTable::issue(Request& r,const uint32_t* rows) {
+    if(r.pending_||!rows||!is_open())return false;
+    r.owner_=impl_;std::copy(rows,rows+PLE_N_HEADS,r.rows_.begin());
+    if(impl_->mode==PleIo::Direct)r.ticket_=impl_->reader.issue(r.rows_.data(),PLE_N_HEADS,r.raw_.data()).id;
+    r.pending_=true;return true;
+}
+bool PleTable::collect(Request& r,float* out,std::string& err) {
+    if(!r.pending_||!r.owner_||!out){err="PLE request collect without matching issue";return false;}
+    auto owner=r.owner_;bool ok=true;
+    if(owner->mode==PleIo::Direct)ok=owner->reader.collect({r.ticket_},err);
+    if(ok)for(int h=0;h<PLE_N_HEADS;++h){
+        const uint8_t* row=owner->mode==PleIo::Direct?r.raw_.data()+(size_t)h*owner->rb:
+            r.rows_[(size_t)h]<owner->n_rows?owner->data+(size_t)r.rows_[(size_t)h]*owner->rb:nullptr;
+        if(row)owner->decode(row,out+h*PLE_HEAD_DIM);else std::fill(out+h*PLE_HEAD_DIM,out+(h+1)*PLE_HEAD_DIM,0.0f);
+    }
+    if(ok)owner->bytes_read+=(uint64_t)PLE_N_HEADS*owner->rb;
+    r.pending_=false;r.owner_.reset();return ok;
+}
 
 bool PleTable::open(const std::string& gguf_path, std::string& err) {
     return open(gguf_path, err, PleIoOptions{});
@@ -233,6 +268,13 @@ bool PleTable::open(const std::string& gguf_path, std::string& err) {
 
 bool PleTable::open(const std::string& gguf_path, std::string& err, const PleIoOptions& io) {
     close();
+    static std::mutex owner_mutex;
+    static std::weak_ptr<TableOwner> single_owner;
+    const char* owner_flag=std::getenv("STRATA_PLE_OWNER");
+    const bool single=owner_flag&&std::strcmp(owner_flag,"single")==0;
+    if(owner_flag&&*owner_flag&&std::strcmp(owner_flag,"off")&&!single){err="STRATA_PLE_OWNER supports off|single";return false;}
+    std::unique_lock<std::mutex> owner_lock(owner_mutex,std::defer_lock);
+    if(single){owner_lock.lock();if(!single_owner.expired()){err="one PLE TableOwner already exists; drain its requests before reopening";return false;}}
     try {
         impl_->file = new GgufFile(gguf_path);
     } catch (const std::exception& e) {
@@ -385,6 +427,7 @@ bool PleTable::open(const std::string& gguf_path, std::string& err, const PleIoO
 #endif
     }
     impl_->mode = io.mode;
+    if(single){impl_->single=true;single_owner=impl_;}
     return true;
 }
 
@@ -399,7 +442,7 @@ void PleTable::prefetch_rows(const uint32_t* rows16) {
     if (impl_->mode == PleIo::Direct && impl_->reader.is_open()) {
         for (size_t i = 0; i < impl_->n_prefetch; ++i)
             if (std::memcmp(impl_->prefetch_keys[i], rows16, sizeof(uint32_t) * PLE_N_HEADS) == 0) return;
-        if (impl_->n_prefetch >= Impl::kMaxPrefetch) wait_prefetches();
+        if (impl_->n_prefetch >= TableOwner::kMaxPrefetch) wait_prefetches();
         const size_t slot = impl_->n_prefetch++;
         std::memcpy(impl_->prefetch_keys[slot], rows16, sizeof(uint32_t) * PLE_N_HEADS);
         impl_->prefetch_tickets[slot] = impl_->reader.issue(impl_->prefetch_keys[slot], PLE_N_HEADS, impl_->prefetch_raw[slot]);
@@ -421,19 +464,8 @@ void PleTable::prefetch_rows(const uint32_t* rows16) {
 }
 
 void PleTable::close() {
-    wait_prefetches();
-    impl_->reader.close();
-    impl_->pending = false;
-    impl_->locked = false;   // the unmap below releases the lock
-    impl_->mode = PleIo::Mmap;
-    delete impl_->file;
-    impl_->file = nullptr;
-    impl_->data = nullptr;
-    impl_->n_rows = 0;
-    impl_->rb = PLE_ROW_BYTES;
-    impl_->fmt = &ple_format_info(PleFormat::IQ4_NL);
-    impl_->scale = 1.0f;
-    impl_->bytes_read = 0;
+    // Pending explicit requests retain their backing and scratch until collect/destruction.
+    impl_=std::make_shared<TableOwner>();
 }
 
 bool PleTable::is_open() const { return impl_->data != nullptr || impl_->reader.is_open(); }
@@ -465,10 +497,10 @@ void PleTable::read_row(uint32_t row, float* out160) const {
 }
 
 bool PleTable::issue(const uint32_t* rows16) {
+    if(impl_->pending)return false; // reject before overwriting an in-flight request's keys
     wait_prefetches();
     std::memcpy(impl_->rows, rows16, sizeof impl_->rows);
     if (impl_->mode == PleIo::Direct) {
-        if (impl_->pending) return false;              // one token in flight per table
         impl_->ticket = impl_->reader.issue(impl_->rows, PLE_N_HEADS, impl_->raw);
         impl_->pending = true;
         return true;
@@ -510,7 +542,7 @@ bool PleTable::gather_batch(const uint32_t* rows, size_t n_tokens, float* out, s
     if (impl_->mode == PleIo::Direct) {
         // Fast path: if all requested tokens match our in-flight/completed prefetch slots, collect them directly
         // without issuing a second PleReader ticket or copying through RowCache.
-        if (impl_->n_prefetch >= n_tokens && n_tokens <= Impl::kMaxPrefetch) {
+        if (impl_->n_prefetch >= n_tokens && n_tokens <= TableOwner::kMaxPrefetch) {
             bool exact_match = true;
             for (size_t t = 0; t < n_tokens; ++t) {
                 if (std::memcmp(impl_->prefetch_keys[t], rows + t * PLE_N_HEADS, sizeof(uint32_t) * PLE_N_HEADS) != 0) {

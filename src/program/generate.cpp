@@ -99,6 +99,9 @@
 #include <unistd.h>
 #include <cerrno>
 #include <sys/stat.h>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 #if !defined(__APPLE__)   // major() / minor(): <sys/types.h> on macOS
 #include <sys/sysmacros.h>
 #endif
@@ -1881,6 +1884,11 @@ int main(int argc, char** argv) {
     }
 #endif
     Options o;
+    { std::string rom_error;
+      if (!strata::platform::socket_rom_config_valid(rom_error)) {
+          std::fprintf(stderr,"P0 configuration refused: %s\n",rom_error.c_str()); return 2;
+      }
+    }
     bool have_tokens = false;
     bool have_logits_stride = false;
     for (int i = 1; i < argc; ++i) {
@@ -4820,6 +4828,13 @@ int main(int argc, char** argv) {
     }
     strata::core::ArenaExpertSource arena_src;
     strata::core::ExpertSource* srcp = nullptr;
+#if defined(__linux__)
+    // The pool pins this thread later. Retain its original allowed CPUs for
+    // the unpublished socket-copy/registration workers at the late ROM commit.
+    cpu_set_t p0_startup_cpus{};
+    const bool p0_startup_cpus_saved = !strata::platform::socket_rom_requested() ||
+        sched_getaffinity(0, sizeof(p0_startup_cpus), &p0_startup_cpus) == 0;
+#endif
     if (o.mmap_experts) {
         // FileExpertSource maps the pack's experts.bin: a canonical pack has it; a native (IQ) pack has it when
         // built with `tools/iq_pack.py --experts-bin` (the per-layer blob sizes of its layout, PR #121).  The low-RAM
@@ -5779,6 +5794,63 @@ int main(int argc, char** argv) {
     }
 
     if (remote_opt && !remote_opt->init(err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
+    // Resolve and fill every GPU cache with the original source first. Registering
+    // both host mirrors before `expert-cache auto` reduced CUDA0/1 by 51/45 slots
+    // on the measured profile, changing GPU-vs-CPU arithmetic. No sizing credit,
+    // cache override or reserve bypass is used: retain upstream cache planning,
+    // then commit ROM before source aliases/readers or graphs are published.
+    if (strata::platform::socket_rom_requested()) {
+        std::vector<int> p0_devices{0};
+        for (const auto& st : stages) p0_devices.push_back(st->dev);
+        std::vector<size_t> p0_free_before;
+        for (int dev : p0_devices) {
+            const strata::core::OnDevice on(dev);
+            size_t free_b = 0, total_b = 0;
+            if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) return 1;
+            p0_free_before.push_back(free_b);
+        }
+        bool p0_ok = false;
+#if defined(__linux__)
+        cpu_set_t p0_host_cpus{};
+        if (!p0_startup_cpus_saved ||
+            sched_getaffinity(0, sizeof(p0_host_cpus), &p0_host_cpus) ||
+            sched_setaffinity(0, sizeof(p0_startup_cpus), &p0_startup_cpus)) {
+            err = "cannot restore original allowed CPUs for ROM startup";
+        } else {
+            try {
+#endif
+                p0_ok = srcp == &arena_src
+                    ? arena_src.enable_full_rom(o.pack, o.native_preset, native_embed, err)
+                    : src.enable_full_rom(native_embed, err);
+#if defined(__linux__)
+            } catch (...) {
+                (void) sched_setaffinity(0, sizeof(p0_host_cpus), &p0_host_cpus);
+                throw;
+            }
+            if (sched_setaffinity(0, sizeof(p0_host_cpus), &p0_host_cpus)) {
+                std::fprintf(stderr, "P0 HOLD: cannot restore the pool host CPU affinity\n");
+                return 1;
+            }
+            cpu_set_t p0_restored_cpus{};
+            if (sched_getaffinity(0, sizeof(p0_restored_cpus), &p0_restored_cpus) ||
+                !CPU_EQUAL(&p0_host_cpus, &p0_restored_cpus)) {
+                std::fprintf(stderr, "P0 HOLD: restored host CPU affinity differs\n");
+                return 1;
+            }
+            std::fprintf(stderr, "P0 post-cache ROM commit: pool host affinity restored\n");
+        }
+#endif
+        if (!p0_ok) std::fprintf(stderr, "P0 FULL FALLBACK: %s; original source retained\n", err.c_str());
+        for (size_t i = 0; i < p0_devices.size(); ++i) {
+            const strata::core::OnDevice on(p0_devices[i]);
+            size_t free_b = 0, total_b = 0;
+            if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) return 1;
+            const int64_t slots = i == 0 ? xcache.slots() : stages[i - 1]->cache.slots();
+            std::fprintf(stderr, "P0 post-cache ROM commit: CUDA%d cache_slots=%lld free_before=%llu free_after=%llu; downstream allocation guards unchanged\n",
+                         p0_devices[i], (long long) slots,
+                         (unsigned long long) p0_free_before[i], (unsigned long long) free_b);
+        }
+    }
     Drive drive;
     // #731 (opt-in, STRATA_DISJOINT_ADAPT=1): the adaptive tiers leave an expert a helper GPU holds out of the primary's
     // promotion candidates (it would sit in both caches).  Asked live, from the helper's own cache (RemoteExperts::holds,
@@ -7010,7 +7082,7 @@ int main(int argc, char** argv) {
                                  "streamed ring %d slots\n", 100.0 * res_share, ring);
         }
     };
-    if (o.resident_cpu_experts) {
+    if (o.resident_cpu_experts && !src.full_rom()) {
         int64_t lend_from = -1;
         if (o.prefill_chunk > 0 && !o.no_prefill_borrow && d_res != nullptr && xcache.slots() > 0) {
             int64_t chunk = o.prefill_chunk;

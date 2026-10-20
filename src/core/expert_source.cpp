@@ -1,5 +1,6 @@
 // src/core/expert_source.cpp - the adapter.  See the header for the three clauses of the contract.
 #include "strata/core/expert_source.hpp"
+#include "strata/core/native_head.hpp"
 #include "strata/core/foresight_swap.hpp"
 #include "strata/core/on_device.hpp"
 #include "strata/platform/aux_cpus.hpp"
@@ -549,6 +550,95 @@ bool file_tier_unbuffered(const std::vector<std::string>& paths, uint64_t arena_
 
 FileExpertSource::~FileExpertSource() { close(); }
 
+void FileExpertSource::socket_blobs(int64_t layer,int64_t expert,const uint8_t* (&out)[2]) const {
+    out[0]=out[1]=nullptr;
+    if(!full_rom()||layer<0||expert<0||layer>=n_layers_||expert>=n_expert_)return;
+    const size_t index=(size_t)layer*(size_t)n_expert_+(size_t)expert;
+    for(unsigned r=0;r<2;++r)out[r]=full_rom_->at(index,r,full_rom_->images()[r].generation);
+}
+
+bool FileExpertSource::enable_full_rom(NativeEmbed& embedding,std::string& err) {
+    using strata::platform::SocketRom;
+    if(full_rom_||complement_ready_||!base_||!embedding.persistent_host_data()) {
+        err="FULL requires an unopened mirror, mapped expert source, and persistent host embedding";return false;
+    }
+    detail::HostMemory memory;
+    if(!detail::host_available_memory(memory)){err="FULL cannot establish cgroup memory headroom";return false;}
+    const uint64_t bytes=expert_bytes()+embedding.bytes();
+    std::vector<unsigned> layer_roles;
+    const char* roles=std::getenv("STRATA_DS_ROM_LAYER_SOCKET");
+    if(!roles){err="FULL requires the externally verified per-layer socket plan";return false;}
+    std::istringstream role_stream(roles);std::string role;
+    while(std::getline(role_stream,role,',')){
+        if(role!="0"&&role!="1"){err="invalid per-layer socket role";return false;}
+        layer_roles.push_back(role=="0"?0u:1u);
+    }
+    if(layer_roles.size()!=(size_t)n_layers_){err="per-layer socket plan does not cover every layer";return false;}
+    std::array<strata::platform::SocketPlacement,2> plan;
+    if(!SocketRom::discover(plan,err))return false;
+    uint64_t reserve=0;for(const auto& s:plan)reserve+=std::max<uint64_t>(16ull<<30,s.capacity/10);
+    // Also reserve page alignment per expert and embedding; never budget payload alone.
+    const uint64_t padded=bytes+4096ull*((uint64_t)n_layers_*(uint64_t)n_expert_+1);
+    if(padded>(UINT64_MAX-reserve)/2||memory.available<2*padded+reserve){err="FULL exceeds cgroup/global headroom";return false;}
+    std::vector<strata::platform::RomSpan> spans;
+    for(int64_t l=0;l<n_layers_;++l)for(int64_t e=0;e<n_expert_;++e)
+        spans.push_back({"expert."+std::to_string(l)+"."+std::to_string(e),(int32_t)l,(int32_t)e,0,layer_blob_bytes_[(size_t)l],{}});
+    const size_t embed_span=spans.size();
+    spans.push_back({"token_embd.weight",-1,-1,0,embedding.bytes(),{}});
+    auto rom=std::make_shared<SocketRom>();
+    auto registered=std::make_shared<std::array<bool,2>>();
+    const uint8_t* aliases[2]{};
+    auto register_before_protect=[&](const std::array<strata::platform::RomImage,2>& images,std::string& why){
+        rom->before_release([images,registered]{
+            int old=-1,n=0;(void)cudaGetDevice(&old);
+            if(cudaGetDeviceCount(&n)!=cudaSuccess)return false;
+            for(int d=0;d<n;++d)if(cudaSetDevice(d)!=cudaSuccess||cudaDeviceSynchronize()!=cudaSuccess){
+                std::fprintf(stderr,"P0 HOLD: GPU drain failed; retaining ROM mappings\n");return false;}
+            if(old>=0)(void)cudaSetDevice(old);
+            std::fprintf(stderr,"P0 ROM shutdown: all device work drained\n");
+            for(unsigned r=0;r<2;++r)if((*registered)[r]){
+                std::fprintf(stderr,"P0 ROM shutdown: unregister role=%u\n",r);
+                if(cudaHostUnregister(images[r].base)!=cudaSuccess){
+                    std::fprintf(stderr,"P0 HOLD: ROM unregister failed; retaining mappings\n");return false;}
+                std::fprintf(stderr,"P0 ROM shutdown: unregistered role=%u\n",r);
+            }
+            return true;
+        });
+        // On this driver ReadOnlySupported=0. Register filled, unpublished pages
+        // while writable, then SocketRom MUST mprotect(PROT_READ) and verify every
+        // page before READY. Both GPU Graph reads and CPU write faults were tested.
+        for(unsigned r=0;r<2;++r){
+          if(!rom->with_socket_registration_placement(r,[&](std::string& reg_error){
+            const cudaError_t status=cudaHostRegister(images[r].base,images[r].bytes,cudaHostRegisterPortable|cudaHostRegisterMapped);
+            if(status!=cudaSuccess){reg_error=std::string("CUDA registration before protection failed: ")+cudaGetErrorName(status)+" / "+cudaGetErrorString(status);(void)cudaGetLastError();return false;}
+            (*registered)[r]=true;void* alias=nullptr;
+            if(cudaHostGetDevicePointer(&alias,images[r].base,0)!=cudaSuccess||!alias){(void)cudaGetLastError();reg_error="ROM CUDA alias failed";return false;}
+            aliases[r]=(const uint8_t*)alias;
+            return true;
+          },why))return false;
+          std::string placement_error;
+          const std::string phase="after-register-role-"+std::to_string(r);
+          if(!rom->verify(placement_error,phase.c_str(),false))
+              std::fprintf(stderr,"P0 per-image registration audit: %s\n",placement_error.c_str());
+        }
+        return true;
+    };
+    if(!rom->build(std::move(spans),[&](const strata::platform::RomSpan& s,uint8_t* dst,std::string& why){
+        if(s.layer<0){std::memcpy(dst,embedding.persistent_host_data(),(size_t)s.bytes);return true;}
+        if(copy_blob(s.layer,s.expert,dst))return true;
+        why="expert source copy failed";return false;
+    },1,err,register_before_protect))return false;
+    const auto images=rom->images();
+    const char* report=std::getenv("STRATA_DS_ROM_REPORT");
+    if(!report||!*report){err="FULL requires STRATA_DS_ROM_REPORT evidence path";return false;}
+    if(!rom->write_report(report,err))return false;
+    if(!embedding.adopt_rom(rom,embed_span,err))return false;
+    full_rom_device_[0]=aliases[0];full_rom_device_[1]=aliases[1];full_rom_roles_=std::move(layer_roles);full_rom_=std::move(rom);
+    std::fprintf(stderr,"P0 FULL READY: two anonymous protected images, %llu bytes/socket; host PFNs still require external audit\n",
+                 (unsigned long long)images[0].bytes);
+    return true;
+}
+
 #if defined(__linux__)
 namespace {
 /// Bytes of [p, p + n) whose pages are in the page cache (mincore, page-granular); 0 when the call fails.
@@ -989,6 +1079,9 @@ bool FileExpertSource::open(const std::string& pack_dir, int64_t n_layers, int64
 
 void FileExpertSource::close() {
     io_stop();
+    full_rom_.reset();
+    full_rom_device_[0] = full_rom_device_[1] = nullptr;
+    full_rom_roles_.clear();
     inputs_.clear();
     if (complement_arena_ != nullptr) {
         if (complement_pinned_ && !complement_registered_) (void) cudaFreeHost(complement_arena_);
@@ -2469,6 +2562,7 @@ void FileExpertSource::begin_layer(int64_t layer, const int32_t* ids, int64_t k)
 }
 
 bool FileExpertSource::transient(int64_t layer, int64_t expert) const {
+    if (full_rom()) return false;
     // the io-prefetch staging of the experts.bin tier is the decode's: the prompt path keeps reading the mapping
     // (its own read-ahead hints), so this answers as it did without io prefetch
     if ((role_ptr_.empty() && direct_.empty()) || layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_) return false;
@@ -2510,6 +2604,12 @@ double FileExpertSource::cached_share(int64_t samples) const {
 }
 
 bool FileExpertSource::copy_blob(int64_t layer, int64_t expert, uint8_t* dst) {
+    if (full_rom()) {
+        const auto* p = layer>=0&&layer<n_layers_&&expert>=0&&expert<n_expert_
+            ? full_rom_->at((size_t)layer*(size_t)n_expert_+(size_t)expert, full_rom_roles_[(size_t)layer], full_rom_->images()[0].generation) : nullptr;
+        if (!p || !dst || layer < 0 || layer >= n_layers_ || expert < 0 || expert >= n_expert_) return false;
+        std::memcpy(dst,p,(size_t)layer_blob_bytes_[(size_t)layer]); return true;
+    }
     if (base_ == nullptr || dst == nullptr || layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_)
         return false;
     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
@@ -2536,6 +2636,7 @@ bool FileExpertSource::copy_blob(int64_t layer, int64_t expert, uint8_t* dst) {
 // copy_blob made one ~2 MB request each - and NTFS serves the unbuffered reads of a mapped file one at a time, so the
 // request size is what sets the rate (see read_direct).  The blobs the RAM copy holds are copied as before.
 bool FileExpertSource::copy_blobs(const int32_t* layers, const int32_t* experts, uint8_t* const* dst, size_t n) {
+    if (full_rom()) return ExpertSource::copy_blobs(layers,experts,dst,n);
     if ((direct_.empty() && pdirect_.empty()) || n <= 1) return ExpertSource::copy_blobs(layers, experts, dst, n);
     thread_local std::vector<Fill> fills;
     fills.clear();
@@ -3447,6 +3548,7 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
 }
 
 const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
+    if (full_rom()) return blob(layer,expert);
     if (io_pf_ && role_ptr_.empty() && direct_.empty()) {
         if (complement_ready_ && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
             const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
@@ -3460,6 +3562,10 @@ const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
 }
 
 const uint8_t* FileExpertSource::blob(int64_t layer, int64_t expert) {
+    if (full_rom()) {
+        if(layer<0||expert<0||layer>=n_layers_||expert>=n_expert_)return nullptr;
+        return full_rom_->at((size_t)layer*(size_t)n_expert_+(size_t)expert,full_rom_roles_[(size_t)layer],full_rom_->images()[0].generation);
+    }
     if (base_ == nullptr || layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_) return nullptr;
     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
     const uint8_t* result = nullptr;
@@ -3500,6 +3606,7 @@ const uint8_t* FileExpertSource::blob(int64_t layer, int64_t expert) {
 }
 
 bool FileExpertSource::pinned(int64_t layer, int64_t expert) const {
+    if (full_rom()) return layer>=0&&expert>=0&&layer<n_layers_&&expert<n_expert_;
     if (!complement_ready_ || !complement_pinned_ || complement_host_ == nullptr || layer < 0 || expert < 0 ||
         layer >= n_layers_ || expert >= n_expert_) return false;
     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
@@ -3513,6 +3620,11 @@ bool FileExpertSource::pinned(int64_t layer, int64_t expert) const {
 }
 
 const uint8_t* FileExpertSource::device_alias(int64_t layer, int64_t expert) const {
+    if (full_rom()) {
+        if(!pinned(layer,expert))return nullptr;
+        const auto& s=full_rom_->spans()[(size_t)layer*(size_t)n_expert_+(size_t)expert];
+        return full_rom_device_[full_rom_roles_[(size_t)layer]]+s.offset;
+    }
     if (!pinned(layer, expert) || complement_device_ == nullptr) return nullptr;
     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
     if (exchange_storage_.active()) return exchange_storage_.resident(index).device;
@@ -3523,6 +3635,7 @@ const uint8_t* FileExpertSource::device_alias(int64_t layer, int64_t expert) con
 }
 
 bool FileExpertSource::pcie_layer(int64_t layer) const {
+    if (full_rom()) return layer>=0&&layer<n_layers_;
     if (complement_ready_ && complement_pinned_ && complement_device_ != nullptr)
         return layer >= 0 && layer < n_layers_;
     return device_alias(layer, 0) != nullptr;
@@ -3632,6 +3745,7 @@ void expert_pool_dispatch(void* user, const float* x_f, const int32_t* ids, cons
         // hit, and using one for the other is how a hit's row would get two experts summed into it.
         ExpertJob& j = d.jobs[(size_t) njobs++];
         j.blob = b;
+        d.src->socket_blobs(d.layers,e,j.socket_blobs);
         j.act = &d.act;             // SHARED across the batch: one conversion serves all ten experts
         j.out = out + (size_t) i * (size_t) n_embd;
         j.weight = 1.0f;            // clause 2: a diagnostic field, NOT the router weight
@@ -3954,6 +4068,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                 jo = (int16_t) njobs++;
                 ExpertJobMulti& nj = d.jobs_multi[(size_t) jo];
                 nj.blob = b;
+                d.src->socket_blobs(d.layers,e,nj.socket_blobs);
                 nj.nt = 0;
             }
             ExpertJobMulti& jb = d.jobs_multi[(size_t) jo];
@@ -4468,6 +4583,39 @@ LoadStats load_experts_gguf(const std::string& gguf, uint8_t* dst, const strata:
 
 ArenaExpertSource::~ArenaExpertSource() { close(); }
 
+bool ArenaExpertSource::enable_full_rom(const std::string& pack,const std::string& native,NativeEmbed& embedding,std::string& err) {
+    if(full_source_||!base_||n_expert_<=0||blobs_%n_expert_){err="FULL arena source is not initialized";return false;}
+    const int64_t experts=n_expert_,layers=blobs_/n_expert_;
+    auto candidate=std::make_unique<FileExpertSource>();candidate->set_gguf(native);
+    if(!candidate->open(pack,layers,experts,err))return false;
+    // The baseline cache was filled from this live arena. Verify every original
+    // blob against the new assembler before replacing that source, not only
+    // against an independently opened GGUF or one cache slot.
+    const auto& layout=strata::kernels::cpu::expert_layout();
+    std::vector<uint8_t> check((size_t)layout.max_blob);
+    for(int64_t l=0;l<layers;++l)for(int64_t e=0;e<experts;++e){
+        const auto* original=blob(l,e);const size_t bytes=(size_t)layout.blob_bytes(l);
+        if(!original||!candidate->copy_blob(l,e,check.data())||std::memcmp(original,check.data(),bytes)){
+            err="FULL original-arena byte mismatch at layer="+std::to_string(l)+" expert="+std::to_string(e);return false;
+        }
+    }
+    std::fprintf(stderr,"P0 original arena source parity: %lld expert blobs bitwise identical\n",(long long)(layers*experts));
+    int old=-1,devices=0;(void)cudaGetDevice(&old);
+    if(cudaGetDeviceCount(&devices)!=cudaSuccess){err="FULL source handoff cannot enumerate DMA readers";return false;}
+    for(int d=0;d<devices;++d)if(cudaSetDevice(d)!=cudaSuccess||cudaDeviceSynchronize()!=cudaSuccess){
+        if(old>=0)(void)cudaSetDevice(old);err="FULL source handoff cannot drain cache-fill DMA";return false;
+    }
+    if(old>=0)(void)cudaSetDevice(old);
+    if(!candidate->enable_full_rom(embedding,err))return false;
+    // No expert reader/cache has been published yet. Drop the old resident arena,
+    // retaining the exact ArenaExpertSource identity used by upstream routing.
+    close();
+    inputs_=candidate->model_inputs();full_source_=std::move(candidate);
+    n_expert_=experts;blobs_=layers*experts;base_=full_source_->blob(0,0);
+    note_="P0 FULL: two independent anonymous read-only socket images";
+    return true;
+}
+
 bool ArenaExpertSource::open(const std::string& pack_dir, int64_t n_layers, int64_t n_expert, int threads,
                              std::string& err, uint64_t max_pinned_bytes,
                              const std::string& shared_arena_file) {
@@ -4801,6 +4949,7 @@ bool ArenaExpertSource::open(const std::string& pack_dir, int64_t n_layers, int6
 }
 
 void ArenaExpertSource::close() {
+    full_source_.reset();
 #if !defined(_WIN32)
     if (map_ != nullptr) munmap(map_, (size_t) map_bytes_);
 #endif
@@ -4817,6 +4966,7 @@ void ArenaExpertSource::close() {
 }
 
 void ArenaExpertSource::prefetch(int64_t layer, int64_t expert) {
+    if(full_source_)return;
 #if defined(_WIN32)
     (void) layer; (void) expert;
 #else
@@ -4835,6 +4985,7 @@ void ArenaExpertSource::prefetch(int64_t layer, int64_t expert) {
 // faults a second in decode, +8 ms a window.  The memory the arena used to hold was never the cache itself but
 // ROCclr's pin-in-place locks on it (see main) - locked pages are the ones the kernel cannot take back.
 uint64_t ArenaExpertSource::release(int64_t layer, int64_t expert) {
+    if(full_source_)return 0;
 #if defined(_WIN32)
     (void) layer; (void) expert;
     return 0;
@@ -4863,11 +5014,13 @@ uint64_t ArenaExpertSource::arena_off(int64_t layer, int64_t expert) const {
 }
 
 bool ArenaExpertSource::pcie_layer(int64_t layer) const {
+    if(full_source_)return full_source_->pcie_layer(layer);
     if (!ranges_) return device_alias(layer, 0) != nullptr;   // the prefix rule (ExpertSource's default)
     return layer >= 0 && (size_t) layer < layer_pcie_.size() && layer_pcie_[(size_t) layer] != 0;
 }
 
 bool ArenaExpertSource::pinned(int64_t layer, int64_t expert) const {
+    if(full_source_)return full_source_->pinned(layer,expert);
     if (base_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return false;
     const auto& lay = strata::kernels::cpu::expert_layout();
     if (ranges_) return pin_range_of(arena_off(layer, expert), lay.blob_bytes(layer)) >= 0;   // the whole blob inside ONE registered range
@@ -4875,6 +5028,7 @@ bool ArenaExpertSource::pinned(int64_t layer, int64_t expert) const {
 }
 
 const uint8_t* ArenaExpertSource::device_alias(int64_t layer, int64_t expert) const {
+    if(full_source_)return full_source_->device_alias(layer,expert);
     if (ranges_) {   // pin by need: the range's device base + the blob's offset inside it
         if (base_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return nullptr;
         const auto& rl = strata::kernels::cpu::expert_layout();
@@ -4891,6 +5045,7 @@ const uint8_t* ArenaExpertSource::device_alias(int64_t layer, int64_t expert) co
 }
 
 const uint8_t* ArenaExpertSource::blob(int64_t layer, int64_t expert) {
+    if(full_source_)return full_source_->blob(layer,expert);
     if (base_ == nullptr) return nullptr;
     if (layer < 0 || expert < 0 || expert >= n_expert_) return nullptr;
     const int64_t idx = layer * n_expert_ + expert;
@@ -4902,6 +5057,7 @@ const uint8_t* ArenaExpertSource::blob(int64_t layer, int64_t expert) {
 }
 
 const uint8_t* ArenaExpertSource::blob_at(int64_t layer, int64_t expert) const {
+    if(full_source_)return full_source_->blob(layer,expert);
     if (base_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return nullptr;
     const int64_t idx = layer * n_expert_ + expert;
     if (idx < 0 || idx >= blobs_) return nullptr;

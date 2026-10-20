@@ -1,0 +1,30 @@
+{
+  "previous_publication_commit": "0329dd9037ab07f4c342058c7ca7a76b5ee263cb",
+  "original_public_engine_source": "9f09b7c3755f8048be812d484e7917bd03bd2c1a",
+  "sources": [
+    {
+      "source_sha256": "e5b89fd71c5b8654aa24792e6d00dcd6ce0072668dcb9605495d3ecaa5c64e81",
+      "public_path": "reports/20261020-e449-isolated.zh-TW.md",
+      "public_sha256": "a63f440ab6370470bde2b2ca4d5535aad8a1991753ccb729232b6004b5c3bf9a",
+      "transformed": "Remove private restoration nonce and observer-operation contract name; preserve all metrics/failures"
+    },
+    {
+      "source_sha256": "b1045413b3d7f2f0231f914e060563137366e671019a4386628f60d42cdf82fb",
+      "public_path": "reports/20261020-pcie-spill.zh-TW.md",
+      "public_sha256": "b23ce8c4cd5207d9898ab61461ce3d6198c475d9397e9c733a34a282727f297e",
+      "transformed": "Remove private restoration nonce and observer-operation contract name; preserve all metrics/failures"
+    },
+    {
+      "source_sha256": "aea46d2c7ea21a78c1a747a5fcdbf1f69d2b7e19f2b31e0183ee939282043674",
+      "public_path": "VALIDATION-LATEST.md",
+      "public_sha256": "aea46d2c7ea21a78c1a747a5fcdbf1f69d2b7e19f2b31e0183ee939282043674",
+      "transformed": "Remove private restoration nonce and observer-operation contract name; preserve all metrics/failures"
+    }
+  ],
+  "current_candidate_C2": "PASS_ORIGINAL_UNCHANGED_FIXED9",
+  "current_candidate_C4": "PASS_ORIGINAL_3PCT_POINT_GATE",
+  "current_candidate_resource": "FAIL_WHOLE_VM_SWAP_IO",
+  "historical_FAILs_unchanged": true,
+  "root_engine_source_modified": false,
+  "release": "NOT_PROMOTED"
+}

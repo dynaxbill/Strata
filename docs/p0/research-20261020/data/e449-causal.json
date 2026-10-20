@@ -1,0 +1,280 @@
+{
+  "archive": "d3ee16884b9897f68f52e18ee0e5079e9d09b833e8dd9b307300bddeafa40cf5",
+  "observer": {
+    "129_P0_old_E449_witness": {
+      "expected_plan": "old",
+      "exact_heads": 41,
+      "heads": 41,
+      "actual_layout": {
+        "device": 1,
+        "T": 6,
+        "layer": 44,
+        "group": 0,
+        "groups": 1,
+        "tb": 0,
+        "n": 6,
+        "ar": 0,
+        "hits_in_combine": 0,
+        "shared_gated": 0,
+        "plan_stride": 488,
+        "batch": 0
+      },
+      "counts": [
+        27,
+        59,
+        16
+      ],
+      "E449_provider": "PCIE",
+      "override_events": [],
+      "CPU_rows_published_copy_exact": true
+    },
+    "130_P0_new_E449_witness": {
+      "expected_plan": "new",
+      "exact_heads": 41,
+      "heads": 41,
+      "actual_layout": {
+        "device": 1,
+        "T": 6,
+        "layer": 44,
+        "group": 0,
+        "groups": 1,
+        "tb": 0,
+        "n": 6,
+        "ar": 0,
+        "hits_in_combine": 0,
+        "shared_gated": 0,
+        "plan_stride": 488,
+        "batch": 0
+      },
+      "counts": [
+        26,
+        58,
+        16
+      ],
+      "E449_provider": "CPU",
+      "override_events": [],
+      "CPU_rows_published_copy_exact": true
+    },
+    "131_P0_old_E449_CPU_ablation": {
+      "expected_plan": "old",
+      "exact_heads": 40,
+      "heads": 41,
+      "actual_layout": {
+        "device": 1,
+        "T": 6,
+        "layer": 44,
+        "group": 0,
+        "groups": 1,
+        "tb": 0,
+        "n": 6,
+        "ar": 0,
+        "hits_in_combine": 0,
+        "shared_gated": 0,
+        "plan_stride": 488,
+        "batch": 0
+      },
+      "counts": [
+        27,
+        58,
+        15
+      ],
+      "E449_provider": "CPU",
+      "override_events": [
+        "C2_E449_ABLATION layer=44 expert=449 request=40 pos=18 T=6 first_entry=55"
+      ],
+      "CPU_rows_published_copy_exact": true
+    }
+  },
+  "pairs": {
+    "old_new": {
+      "complete_heads_exact": 40,
+      "first40_heads_exact": true,
+      "target_head_exact": false,
+      "actual_controls_equal": false,
+      "inputs": {
+        "activation": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "weights": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "ids": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        }
+      },
+      "shared": {
+        "bitwise": true,
+        "maxabs": 0.0,
+        "RMS": 0.0
+      },
+      "combined": {
+        "bitwise": false,
+        "maxabs": 0.00032845698297023773,
+        "RMS": 3.509165439060108e-05
+      },
+      "next_activation": {
+        "bitwise": false,
+        "maxabs": 0.008497953414916992,
+        "RMS": 0.0007007821054348354
+      },
+      "different_effective_experts": [
+        {
+          "row": 5,
+          "token_position": 23,
+          "rank": 5,
+          "experts": [
+            449,
+            449
+          ],
+          "providers": [
+            "PCIE",
+            "CPU"
+          ],
+          "bitwise": false,
+          "maxabs": 0.0035861246287822723,
+          "RMS": 0.0009384837291485419
+        }
+      ]
+    },
+    "old_ablation": {
+      "complete_heads_exact": 40,
+      "first40_heads_exact": true,
+      "target_head_exact": false,
+      "actual_controls_equal": true,
+      "inputs": {
+        "activation": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "weights": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "ids": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        }
+      },
+      "shared": {
+        "bitwise": true,
+        "maxabs": 0.0,
+        "RMS": 0.0
+      },
+      "combined": {
+        "bitwise": false,
+        "maxabs": 0.00032845698297023773,
+        "RMS": 3.509165439060108e-05
+      },
+      "next_activation": {
+        "bitwise": false,
+        "maxabs": 0.008497953414916992,
+        "RMS": 0.0007007821054348354
+      },
+      "different_effective_experts": [
+        {
+          "row": 5,
+          "token_position": 23,
+          "rank": 5,
+          "experts": [
+            449,
+            449
+          ],
+          "providers": [
+            "PCIE",
+            "CPU"
+          ],
+          "bitwise": false,
+          "maxabs": 0.0035861246287822723,
+          "RMS": 0.0009384837291485419
+        }
+      ]
+    },
+    "ablation_new": {
+      "complete_heads_exact": 41,
+      "first40_heads_exact": true,
+      "target_head_exact": true,
+      "actual_controls_equal": false,
+      "inputs": {
+        "activation": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "weights": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        },
+        "ids": {
+          "bitwise": true,
+          "maxabs": 0.0,
+          "RMS": 0.0
+        }
+      },
+      "shared": {
+        "bitwise": true,
+        "maxabs": 0.0,
+        "RMS": 0.0
+      },
+      "combined": {
+        "bitwise": true,
+        "maxabs": 0.0,
+        "RMS": 0.0
+      },
+      "next_activation": {
+        "bitwise": true,
+        "maxabs": 0.0,
+        "RMS": 0.0
+      },
+      "different_effective_experts": []
+    }
+  },
+  "scope": "Actual GPU plan/mapped-copy markers; CPU host output only for published CPU-owned rows, tail-skip0. No tolerance or original envelope changes.",
+  "single_E449_frontier_causal_confirmed": true,
+  "entire_target_head_causal_reproduction": true,
+  "prior_archive": "52b5a9c7f2423dd94261fdd47b3e50ccc6f8d56595199fc76f8576c8d1c3497a",
+  "label_bridge": {
+    "129_P0_old_E449_witness": "133_P0_old_isolated_observer",
+    "130_P0_new_E449_witness": "prior_130_P0_new_E449_witness",
+    "131_P0_old_E449_CPU_ablation": "134_P0_old_E449_CPU_reserved"
+  },
+  "exact_micro": {
+    "rc": 0,
+    "report": {
+      "layer": 44,
+      "expert": 449,
+      "gu_type": "iq3_s",
+      "down_type": "iq4_nl",
+      "n_embd": 2560,
+      "n_ff": 640,
+      "mt_min": 1,
+      "cpu_activation_type": "q8_K",
+      "cpu_hidden_type": "q8_0",
+      "gpu_activation_type": "q8_1",
+      "cpu_repeat_bitwise": true,
+      "CPU_TRACE_BITWISE": true,
+      "GPU_used": true,
+      "GPU_TRACE_BITWISE": true,
+      "gpu_repeat_bitwise": true,
+      "gpu_weight_copy_bitwise": true,
+      "GPU_cap": 60,
+      "GPU_input_rows": 6,
+      "GPU_target_row": 5,
+      "GPU_PCIE_group_count": 16,
+      "GPU_gy": 4,
+      "maxabs": 0.0035861246287822723,
+      "RMS": 0.0009384837291485418
+    },
+    "status": "MICRO_EXACT_BOTH_TRACES"
+  },
+  "source_and_trace_micro_integration": "Exact CPU/GPU original trace + original weight copy; original C2 gates remain FAIL, no latency/promotion claim"
+}

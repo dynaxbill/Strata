@@ -1,0 +1,596 @@
+diff --git a/include/strata/core/batch_logit_trace.hpp b/include/strata/core/batch_logit_trace.hpp
+new file mode 100644
+index 0000000..b09f189
+--- /dev/null
++++ b/include/strata/core/batch_logit_trace.hpp
+@@ -0,0 +1,66 @@
++#pragma once
++// Diagnostic capture only: full vocabulary, every batch row including draft candidates.
++// Files identify row/slot/position/input token. These do not alone identify a complete prefix.
++#include <cuda_runtime.h>
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <limits>
++#include <string>
++#include <vector>
++#if defined(_WIN32)
++#include <process.h>
++#else
++#include <unistd.h>
++#endif
++namespace strata::core {
++inline bool trace_batch_head(const float* logits,int64_t vocab,int S,const int* rows,
++    const int32_t* tokens,const int64_t* positions,const int32_t* selected,
++    int device,cudaStream_t stream,std::string& error) {
++    static const char* prefix=std::getenv("STRATA_DUMP_BATCH_LOGITS");
++    if (!prefix || !*prefix) return true;
++    static std::atomic<uint64_t> sequence{0},used{0};
++    static const uint64_t budget=[] {
++        const char* p=std::getenv("STRATA_BATCH_TRACE_MAX_BYTES");
++        if (!p || !*p) return uint64_t(2)<<30;
++        char* end=nullptr;const auto n=std::strtoull(p,&end,10);
++        return (!end || *end || *p=='-' || n==0) ? uint64_t(0) : uint64_t(n);
++    }();
++    if (vocab<=0 || S<=0 || S>8 || uint64_t(vocab)>SIZE_MAX/sizeof(float)/uint64_t(S)) {
++        error="batch trace: invalid head dimensions"; return false;
++    }
++    const uint64_t bytes=uint64_t(vocab)*uint64_t(S)*sizeof(float);
++    const auto consumed=used.fetch_add(bytes);
++    if (!budget || bytes>budget || consumed>budget-bytes) {
++        error="batch trace: capture budget exhausted; diagnostic incomplete";return false;
++    }
++    std::vector<float> host(size_t(vocab)*size_t(S));
++    if(cudaMemcpyAsync(host.data(),logits,(size_t)bytes,cudaMemcpyDeviceToHost,stream)!=cudaSuccess ||
++       cudaStreamSynchronize(stream)!=cudaSuccess) {error="batch trace: full head copy failed";return false;}
++    const uint64_t seq=sequence.fetch_add(1);
++#if defined(_WIN32)
++    const auto pid=_getpid();
++#else
++    const auto pid=getpid();
++#endif
++    const std::string stem=std::string(prefix)+"."+std::to_string(pid)+"."+std::to_string(seq);
++    std::FILE* f=std::fopen((stem+".f32").c_str(),"wb");
++    if(!f) {error="batch trace: cannot open payload";return false;}
++    const bool written=std::fwrite(host.data(),1,(size_t)bytes,f)==bytes;
++    const bool closed=std::fclose(f)==0;
++    if(!written || !closed) {error="batch trace: incomplete payload";return false;}
++    f=std::fopen((stem+".json").c_str(),"wb");
++    if(!f) {error="batch trace: cannot open metadata";return false;}
++    std::fprintf(f,"{\"sequence\":%llu,\"pid\":%d,\"device\":%d,\"vocab\":%lld,\"S\":%d,"
++        "\"bytes\":%llu,\"dtype\":\"native-float32\",\"kind\":\"batch-candidates-before-commit\",\"rows\":[",
++        (unsigned long long)seq,(int)pid,device,(long long)vocab,S,(unsigned long long)bytes);
++    for(int t=0;t<S;++t) std::fprintf(f,"%s{\"row\":%d,\"slot\":%d,\"position\":%lld,\"input_token\":%d,\"selected\":%d}",
++        t?",":"",t,rows[t],(long long)positions[t],tokens[t],selected[t]);
++    std::fputs("]}\n",f);
++    const bool metadata_ok=std::ferror(f)==0;
++    const bool metadata_closed=std::fclose(f)==0;
++    if(!metadata_ok || !metadata_closed) {error="batch trace: incomplete metadata";return false;}
++    return true;
++}
++}
+diff --git a/include/strata/core/slot_trace.hpp b/include/strata/core/slot_trace.hpp
+new file mode 100644
+index 0000000..42379c2
+--- /dev/null
++++ b/include/strata/core/slot_trace.hpp
+@@ -0,0 +1,69 @@
++#pragma once
++// Diagnostic only. Trace-off does not call the clock, rusage, or stdio.
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#if defined(__linux__)
++#include <sys/resource.h>
++#endif
++namespace strata::core {
++inline bool slot_trace_enabled() {
++    static const bool enabled = [] { const char* p=std::getenv("STRATA_ADMISSION_TRACE");
++        return p && std::strcmp(p,"1")==0; }();
++    return enabled;
++}
++struct SlotTraceContext { uint64_t request=0; int slot=-1, stage=-1, layer=-1; };
++inline thread_local SlotTraceContext slot_trace_context;
++inline thread_local uint64_t slot_trace_sequence=0;
++class SlotTrace {
++    using Clock=std::chrono::steady_clock;
++    bool enabled_;
++    const char* phase_;
++    SlotTraceContext previous_;
++    Clock::time_point start_;
++    uint64_t bytes_;
++    long minor_=0, major_=0;
++public:
++    explicit SlotTrace(const char* phase, int slot=-2, int stage=-2, int layer=-2,
++                       uint64_t bytes=0, bool root=false)
++        : enabled_(slot_trace_enabled()), phase_(phase), bytes_(bytes) {
++        if (!enabled_) return;
++        previous_=slot_trace_context;
++        if (root) slot_trace_context.request=++slot_trace_sequence;
++        if (slot!=-2) slot_trace_context.slot=slot;
++        if (stage!=-2) slot_trace_context.stage=stage;
++        if (layer!=-2) slot_trace_context.layer=layer;
++        start_=Clock::now();
++#if defined(__linux__)
++        rusage u{}; if (getrusage(RUSAGE_THREAD,&u)==0) { minor_=u.ru_minflt; major_=u.ru_majflt; }
++#endif
++    }
++    SlotTrace(const SlotTrace&)=delete;
++    SlotTrace& operator=(const SlotTrace&)=delete;
++    ~SlotTrace() {
++        if (!enabled_) return;
++        const auto end=Clock::now();
++        long minor=0,major=0;
++#if defined(__linux__)
++        rusage u{}; if (getrusage(RUSAGE_THREAD,&u)==0) { minor=u.ru_minflt-minor_; major=u.ru_majflt-major_; }
++#endif
++        const auto c=slot_trace_context;
++        std::fprintf(stderr,"SLOT_TRACE {\"request\":%llu,\"slot\":%d,\"stage\":%d,\"layer\":%d,"
++          "\"phase\":\"%s\",\"start_us\":%lld,\"duration_us\":%lld,\"bytes\":%llu,"
++          "\"minor_faults\":%ld,\"major_faults\":%ld}\n",
++          (unsigned long long)c.request,c.slot,c.stage,c.layer,phase_,
++          (long long)std::chrono::duration_cast<std::chrono::microseconds>(start_.time_since_epoch()).count(),
++          (long long)std::chrono::duration_cast<std::chrono::microseconds>(end-start_).count(),
++          (unsigned long long)bytes_,minor,major);
++        slot_trace_context=previous_;
++    }
++};
++template<class T> class SlotTraceRelease {
++    T& object_; const char* phase_;
++public:
++    SlotTraceRelease(T& object,const char* phase):object_(object),phase_(phase) {}
++    ~SlotTraceRelease() { if(slot_trace_enabled()) { SlotTrace trace(phase_); object_=T{}; } }
++};
++} // namespace strata::core
+diff --git a/include/strata/platform/socket_rom.hpp b/include/strata/platform/socket_rom.hpp
+index 8c3f071..3756ba4 100644
+--- a/include/strata/platform/socket_rom.hpp
++++ b/include/strata/platform/socket_rom.hpp
+@@ -39,7 +39,7 @@ public:
+     SocketRom(const SocketRom&) = delete;
+     SocketRom& operator=(const SocketRom&) = delete;
+     bool build(std::vector<RomSpan> spans, Copy copy, uint64_t generation, std::string& err,
+-               BeforeProtect before_protect = {});
++               BeforeProtect before_protect = {}, BeforeProtect before_copy = {});
+     bool verify(std::string& err, const char* phase = "protected", bool require_read_only = true) const;
+     bool write_report(const std::string& path, std::string& err) const;
+     const uint8_t* at(size_t span, unsigned role, uint64_t expected_generation) const;
+diff --git a/serve/replicas.py b/serve/replicas.py
+index f788dea..df9fdc8 100644
+--- a/serve/replicas.py
++++ b/serve/replicas.py
+@@ -211,11 +211,14 @@ class ReplicaEngine:
+ 
+     @property
+     def last(self):
+-        return self.current.last
++        if not hasattr(self.tl, "last"):
++            self.tl.last = self.current.last
++        return self.tl.last
+ 
+     @last.setter
+     def last(self, value):
+         self.current.last = value
++        self.tl.last = value
+ 
+     @property
+     def batch(self) -> int:
+@@ -387,9 +390,11 @@ class ReplicaEngine:
+         if k < 0:
+             raise EngineDied("no replica is running; this request was not sent")
+         e = self.engines[k]
++        _ = self.last                         # initialize a stable before-DONE identity for this caller
+         self.tl.cur = e
+         produced: list[int] = []
+         held = False
++        gen = None
+         nonfinite = False
+         try:
+             self.router.note(k, ids)
+@@ -399,6 +404,7 @@ class ReplicaEngine:
+                     if cancel is not None and cancel.is_set():
+                         return
+                 held = True
++            native_before = e.last
+             if embeddings is not None:
+                 gen = e.generate(ids, max_new, sampling, cancel, embeddings=embeddings)
+             else:
+@@ -411,11 +417,17 @@ class ReplicaEngine:
+             nonfinite = True
+             raise
+         finally:
+-            if held:
+-                self.run_locks[k].release()
+-            with self.lock:
+-                self.inflight[k] -= 1
+-            if nonfinite:                       # #879: the engine dropped every cached conversation
+-                self.router.forget(k)
+-            elif produced:
+-                self.router.note(k, list(ids) + produced)
++            try:
++                if gen is not None:
++                    gen.close()                 # settle native DONE before another request owns its pipe
++            finally:
++                if gen is not None and e.last is not native_before:
++                    self.tl.last = dict(e.last)      # snapshot under the pipe ownership lock
++                if held:
++                    self.run_locks[k].release()
++                with self.lock:
++                    self.inflight[k] -= 1
++                if nonfinite:
++                    self.router.forget(k)
++                elif produced:
++                    self.router.note(k, list(ids) + produced)
+diff --git a/src/core/conversation_copy.hpp b/src/core/conversation_copy.hpp
+index 0dea46a..92c7c03 100644
+--- a/src/core/conversation_copy.hpp
++++ b/src/core/conversation_copy.hpp
+@@ -4,6 +4,7 @@
+ #include "strata/core/progress.hpp"
+ 
+ #include <cuda_runtime.h>
++#include "strata/core/slot_trace.hpp"
+ 
+ #include <algorithm>
+ #include <chrono>
+@@ -20,6 +21,7 @@ namespace strata::core::conversation_detail {
+ /// "operation would make the legacy stream depend on a capturing blocking stream".  The caller's contract is
+ /// unchanged: the device was synchronized before the copy (the copy itself is complete on return).
+ inline cudaError_t copy_nonblocking(void* dst, const void* src, size_t bytes) {
++    core::SlotTrace total("copy_total", -2,-2,-2,bytes);
+     int dev = 0;
+     cudaError_t e = cudaGetDevice(&dev);
+     if (e != cudaSuccess) return e;
+@@ -31,9 +33,11 @@ inline cudaError_t copy_nonblocking(void* dst, const void* src, size_t bytes) {
+         if (e != cudaSuccess) { streams[(size_t) dev] = nullptr; return e; }
+     }
+     cudaStream_t s = streams[(size_t) dev];
+-    e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, s);
++    { core::SlotTrace enqueue("copy_enqueue", -2,-2,-2,bytes);
++      e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, s); }
+     if (e != cudaSuccess) return e;
+-    e = cudaStreamSynchronize(s);
++    { core::SlotTrace wait("copy_wait", -2,-2,-2,bytes);
++      e = cudaStreamSynchronize(s); }
+     core::progress_beat();   // #2049: a parked conversation is many of these; each one that lands is progress
+     return e;
+ }
+diff --git a/src/core/conversation_snapshot.cpp b/src/core/conversation_snapshot.cpp
+index 1468dc6..3dd3602 100644
+--- a/src/core/conversation_snapshot.cpp
++++ b/src/core/conversation_snapshot.cpp
+@@ -171,7 +171,7 @@ bool conversation_kv_save(ConversationKv& image, const QsaState& st, const Model
+         const size_t keep = i == 4 ? (index ? size_t(unchanged_tokens / strata::kernels::qsa_real_shapes().idx_block) * g.idx_key_dim * 4 : 0)
+                                   : l.cells ? (sizes[i] / size_t(l.cells)) * size_t(whole_cells) : 0;
+         if (keep > dst[i]->size()) { error = "conversation snapshot: missing reusable prefix"; return false; }
+-        dst[i]->resize(sizes[i]);
++        { SlotTrace trace("kv_allocate", -2,-2,-2,sizes[i]); dst[i]->resize(sizes[i]); }
+         if (!dst[i]->visit(keep, sizes[i] - keep, [&](uint8_t* p, size_t n, size_t at) {
+                 return transfer(p, src[i] ? static_cast<const uint8_t*>(src[i]) + at : nullptr, n, error);
+             })) return false;
+diff --git a/src/core/conversation_state.cpp b/src/core/conversation_state.cpp
+index a93715d..de50386 100644
+--- a/src/core/conversation_state.cpp
++++ b/src/core/conversation_state.cpp
+@@ -24,6 +24,7 @@ bool fail(std::string& error, const char* message) {
+ }
+ 
+ bool sync(std::string& error) {
++    SlotTrace trace("checkpoint_device_sync");
+     const auto status = cudaDeviceSynchronize();
+     if (status == cudaSuccess) return true;
+     error = std::string("conversation snapshot synchronize: ") + cudaGetErrorString(status);
+@@ -171,8 +172,9 @@ bool conversation_checkpoint_save(ConversationCheckpoint& c, const SessionState&
+     ConversationStateSizes z;
+     if (!checkpoint_targets(ss, g, c.ids.size(), z, error)) return false;
+     const size_t layers = owned_qsa(ss);
+-    c.gdn.resize(z.gdn); c.ple.resize(ss.ple_hist ? z.ple : 0);
+-    c.tails.resize(layers * z.tail); c.dead.resize(layers * z.dead); c.block_pos.resize(layers * z.block_pos);
++    { SlotTrace trace("checkpoint_allocate");
++      c.gdn.resize(z.gdn); c.ple.resize(ss.ple_hist ? z.ple : 0);
++      c.tails.resize(layers * z.tail); c.dead.resize(layers * z.dead); c.block_pos.resize(layers * z.block_pos); }
+     if (!copy(c.gdn.data(), ss.gdn_state, c.gdn.size(), error) ||
+         !copy(c.ple.data(), ss.ple_hist, c.ple.size(), error)) return false;
+     for (size_t j = 0; j < layers; ++j) {
+diff --git a/src/core/expert_source.cpp b/src/core/expert_source.cpp
+index 1ee9257..a1af526 100644
+--- a/src/core/expert_source.cpp
++++ b/src/core/expert_source.cpp
+@@ -588,6 +588,8 @@ bool FileExpertSource::enable_full_rom(NativeEmbed& embedding,std::string& err)
+     auto rom=std::make_shared<SocketRom>();
+     auto registered=std::make_shared<std::array<bool,2>>();
+     const uint8_t* aliases[2]{};
++    const char* prepare_env=std::getenv("STRATA_ROM_REGISTER_BEFORE_COPY");
++    const bool register_before_copy=prepare_env&&std::strcmp(prepare_env,"1")==0;
+     auto register_before_protect=[&](const std::array<strata::platform::RomImage,2>& images,std::string& why){
+         rom->before_release([images,registered]{
+             int old=-1,n=0;(void)cudaGetDevice(&old);
+@@ -616,6 +618,9 @@ bool FileExpertSource::enable_full_rom(NativeEmbed& embedding,std::string& err)
+             aliases[r]=(const uint8_t*)alias;
+             return true;
+           },why))return false;
++          // In the early mode role1 has not been populated after role0 registration yet.
++          // The complete strict census follows both registrations, before COPY.
++          if(register_before_copy && r==0)continue;
+           std::string placement_error;
+           const std::string phase="after-register-role-"+std::to_string(r);
+           if(!rom->verify(placement_error,phase.c_str(),false))
+@@ -623,11 +628,24 @@ bool FileExpertSource::enable_full_rom(NativeEmbed& embedding,std::string& err)
+         }
+         return true;
+     };
++    SocketRom::BeforeProtect protect_hook,prepare_hook;
++    if(register_before_copy){
++        std::fprintf(stderr,"P0 allocation mode: register unpublished anonymous RW pages before COPY/HASH\n");
++        prepare_hook=register_before_protect;
++        protect_hook=[](const std::array<strata::platform::RomImage,2>&,std::string& why){
++            int saved=-1,count=0;if(cudaGetDevice(&saved)!=cudaSuccess||cudaGetDeviceCount(&count)!=cudaSuccess){why="P0 post-copy device query failed";return false;}
++            bool ok=true;
++            for(int d=0;d<count;++d)if(cudaSetDevice(d)!=cudaSuccess||cudaDeviceSynchronize()!=cudaSuccess){ok=false;break;}
++            if(cudaSetDevice(saved)!=cudaSuccess)ok=false;
++            if(!ok)why="P0 post-copy device barrier failed";
++            return ok;
++        };
++    }else protect_hook=register_before_protect;
+     if(!rom->build(std::move(spans),[&](const strata::platform::RomSpan& s,uint8_t* dst,std::string& why){
+         if(s.layer<0){std::memcpy(dst,embedding.persistent_host_data(),(size_t)s.bytes);return true;}
+         if(copy_blob(s.layer,s.expert,dst))return true;
+         why="expert source copy failed";return false;
+-    },1,err,register_before_protect))return false;
++    },1,err,std::move(protect_hook),std::move(prepare_hook)))return false;
+     const auto images=rom->images();
+     const char* report=std::getenv("STRATA_DS_ROM_REPORT");
+     if(!report||!*report){err="FULL requires STRATA_DS_ROM_REPORT evidence path";return false;}
+diff --git a/src/core/verify.cpp b/src/core/verify.cpp
+index a8791cc..c7901fc 100644
+--- a/src/core/verify.cpp
++++ b/src/core/verify.cpp
+@@ -1,3 +1,4 @@
++#include "strata/core/batch_logit_trace.hpp"
+ // src/core/verify.cpp - see include/strata/core/verify.hpp.
+ #include "strata/core/batch_rows.hpp"
+ #include "strata/kernels/gfx_arch.hpp"
+@@ -3178,7 +3179,8 @@ bool Verifier::sample_rows(int S, std::string& err) {
+         any = true;
+     }
+     if (any && cudaStreamSynchronize(cs_) != cudaSuccess) { err = "verify batch: the row sampling failed"; return false; }
+-    return true;
++    return trace_batch_head(head_logits_,n_vocab_,S,last_rows_,last_tokens_,last_pos_b_,
++                            h_out_,device_,cs_,err);
+ }
+ 
+ bool Verifier::batch_launch(int base, int S, const int32_t* tokens, const int64_t* pos, std::string& err) {
+diff --git a/src/platform/socket_rom.cpp b/src/platform/socket_rom.cpp
+index aa5e060..a06b891 100644
+--- a/src/platform/socket_rom.cpp
++++ b/src/platform/socket_rom.cpp
+@@ -123,7 +123,7 @@ bool SocketRom::discover(std::array<SocketPlacement,2>& out,std::string& err) {
+     (void)out;err="P0 ROM requires Linux";return false;
+ #endif
+ }
+-bool SocketRom::build(std::vector<RomSpan> spans,Copy copy,uint64_t generation,std::string& err,BeforeProtect before_protect) {
++bool SocketRom::build(std::vector<RomSpan> spans,Copy copy,uint64_t generation,std::string& err,BeforeProtect before_protect,BeforeProtect before_copy) {
+ #if defined(__linux__)
+     if(ready_||images_[0].base||images_[1].base){err="ROM owner is single use";return false;}
+     if(!generation||spans.empty()){err="empty ROM or zero generation";return false;}
+@@ -149,6 +149,12 @@ bool SocketRom::build(std::vector<RomSpan> spans,Copy copy,uint64_t generation,s
+         unsigned long mask[16]{};for(int n:placement_[role].nodes)mask[n/(8*sizeof(unsigned long))]|=1ul<<(n%(8*sizeof(unsigned long)));
+         if(syscall(SYS_mbind,image.base,image.bytes,MPOL_BIND,mask,1024,MPOL_MF_STRICT)){err="ROM mbind failed: "+std::string(std::strerror(errno));return false;}
+     }
++    // Optional pinned allocation preparation runs on unpublished RW mappings before any payload write.
++    // A failed preparation destroys this candidate; there is no migrate-and-retry path.
++    if(before_copy){
++        if(!before_copy(images_,err))return false;
++        if(!verify(err,"after-allocation-prepare",false))return false;
++    }
+     std::array<std::string,2> failures;std::array<std::vector<std::string>,2> hashes;
+     auto worker=[&](unsigned r){try{
+         cpu_set_t cpus;CPU_ZERO(&cpus);for(int c:placement_[r].cpus)CPU_SET(c,&cpus);
+@@ -172,7 +178,7 @@ bool SocketRom::build(std::vector<RomSpan> spans,Copy copy,uint64_t generation,s
+     // Driver registration is allowed only before publishing a pointer. The final
+     // transition to PROT_READ is mandatory, followed by a complete placement scan.
+     if(before_protect){
+-        if(!verify(err,"before-register",false))return false;
++        if(!verify(err,before_copy?"after-copy-pre-protect":"before-register",false))return false;
+         if(!before_protect(images_,err))return false;
+         std::string registration_placement;
+         if(!verify(registration_placement,"after-register",false))
+@@ -183,7 +189,7 @@ bool SocketRom::build(std::vector<RomSpan> spans,Copy copy,uint64_t generation,s
+     for(unsigned r=0;r<2;++r)for(int c:placement_[r].cpus)cpu_roles[(size_t)c]=(int)r;
+     ready_=true;return true;
+ #else
+-    (void)spans;(void)copy;(void)generation;(void)before_protect;err="P0 ROM requires Linux";return false;
++    (void)spans;(void)copy;(void)generation;(void)before_protect;(void)before_copy;err="P0 ROM requires Linux";return false;
+ #endif
+ }
+ bool SocketRom::verify(std::string& err,const char* phase,bool require_read_only) const {
+diff --git a/src/program/generate.cpp b/src/program/generate.cpp
+index f9db0e8..287c1d1 100644
+--- a/src/program/generate.cpp
++++ b/src/program/generate.cpp
+@@ -1,3 +1,4 @@
++#include "strata/core/slot_trace.hpp"
+ #include "strata/core/logit_bias.hpp"
+ // src/program/generate.cpp - P2.S6: `strata generate`.
+ //
+@@ -9933,40 +9934,75 @@ int main(int argc, char** argv) {
+             in_lines.pop_front();
+             return true;
+         };
++        // Experimental staging reuse: the owner is this serial admission loop, never a parked session.
++        // Save always uses unchanged_tokens=0; every payload byte is overwritten before restore.
++        const bool slot_copy_reuse = [] { const char* p=std::getenv("STRATA_SLOT_COPY_REUSE");
++            return p && std::strcmp(p,"1")==0; }();
++        const bool slot_copy_verify = [] { const char* p=std::getenv("STRATA_SLOT_COPY_VERIFY");
++            return p && std::strcmp(p,"1")==0; }();
++        auto verify_checkpoint = [&](const strata::core::ConversationCheckpoint& wanted,
++                                     strata::core::SessionState& target,std::string& why) {
++            if (!slot_copy_verify) return true;
++            strata::core::ConversationCheckpoint actual; actual.ids=wanted.ids;
++            if (!strata::core::conversation_checkpoint_save(actual,target,g,why)) return false;
++            if (wanted.gdn!=actual.gdn || wanted.ple!=actual.ple || wanted.tails!=actual.tails ||
++                wanted.dead!=actual.dead || wanted.block_pos!=actual.block_pos ||
++                target.ple_prev[0]!=(wanted.ids.size()>1?wanted.ids[wanted.ids.size()-2]:-1) ||
++                target.ple_prev[1]!=(wanted.ids.empty()?-1:wanted.ids.back())) {
++                why="slot diagnostic: checkpoint restore bitwise mismatch";return false;
++            }
++            return true;
++        };
++        strata::core::ConversationCheckpoint slot_copy_checkpoint;
++        strata::core::ConversationKv slot_copy_kv;
+         // the session a request just left behind (its prompt) -> slot b's sessions, on every stage
+         auto copy_to_slot = [&](int b, const std::vector<int32_t>& ids, std::string& e) -> bool {
+             const int64_t upto = (int64_t) ids.size();
+             for (size_t k = 0; k < bslot_ss.size(); ++k) {
+                 strata::core::SessionState& from = k == 0 ? ss : stages[k - 1]->ss;
+                 strata::core::SessionState& to = *bslot_ss[k][(size_t) b];
++                strata::core::SlotTrace trace_stage("slot_state_copy",-2,(int)k);
+                 const strata::core::OnDevice on_k(k == 0 ? 0 : stages[k - 1]->dev);
+-                if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
+-                strata::core::ConversationCheckpoint ck;
++                if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
++                strata::core::ConversationCheckpoint local_ck;
++                    strata::core::SlotTraceRelease trace_release(local_ck,"ConversationCheckpoint_release");
++                auto& ck = slot_copy_reuse ? slot_copy_checkpoint : local_ck;
+                 ck.ids = ids;
+                 if (!strata::core::conversation_checkpoint_save(ck, from, g, e) ||
+                     !strata::core::conversation_checkpoint_restore(ck, to, g, e))
+                     return false;
++                if (!verify_checkpoint(ck,to,e)) return false;
+                 for (int64_t j = 0; j < from.qsa_alloc; ++j) {
+-                    strata::core::ConversationKv img;
++                    strata::core::SlotTrace trace_layer("kv_layer",-2,(int)k,(int)j);
++                    strata::core::ConversationKv local_img;
++                    strata::core::SlotTraceRelease trace_release(local_img,"ConversationKv_release");
++                    auto& img = slot_copy_reuse ? slot_copy_kv : local_img;
+                     if (!strata::core::conversation_kv_save(img, from.qsa_states[from.qsa_ord0 + j], g, upto, true, e))
+                         return false;
+-                    if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
++                    if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
+                     if (!strata::core::conversation_kv_restore(img, to.qsa_states[to.qsa_ord0 + j], g, upto, true, e))
+                         return false;
++                    if (slot_copy_verify) {
++                        uint64_t fingerprint=0;
++                        if (!strata::core::conversation_kv_verify(img,to.qsa_states[to.qsa_ord0+j],g,upto,true,
++                                                                fingerprint,e)) return false;
++                    }
+                 }
+-                if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
++                if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch admission: device sync failed"; return false; }
+             }
+             if (batch_mtp) {
+                 // Admission first builds the solo draft KV; copy it into the slot before drafting.  Both drafters' K/V
+                 // are on the drafter's device (the last stage's GPU with a layer split): the copy's ring refill is a
+                 // kernel launch there.
+                 const strata::core::OnDevice on_mtp(mtp.device());
+-                strata::core::ConversationKv image;
++                strata::core::ConversationKv local_image;
++                    strata::core::SlotTraceRelease trace_release(local_image,"ConversationKv_release");
++                auto& image = slot_copy_reuse ? slot_copy_kv : local_image;
+                 if (!mtp.idle(e) || !slot_mtp[(size_t) b]->idle(e) ||
+                     !strata::core::conversation_kv_save(image, mtp.kv_state(), draft_geometry, upto, false, e) ||
+                     !strata::core::conversation_kv_restore(image, slot_mtp[(size_t) b]->kv_state(),
+                                                            draft_geometry, upto, false, e) ||
+-                    cudaDeviceSynchronize() != cudaSuccess)
++                    ([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess)
+                     return false;
+                 slot_mtp[(size_t) b]->set_prompt_len(upto);
+             }
+@@ -9981,37 +10017,52 @@ int main(int argc, char** argv) {
+             for (size_t k = 0; k < bslot_ss.size(); ++k) {
+                 strata::core::SessionState& from = *bslot_ss[k][(size_t) b];
+                 strata::core::SessionState& to = k == 0 ? ss : stages[k - 1]->ss;
++                strata::core::SlotTrace trace_stage("slot_state_copy",-2,(int)k);
+                 const strata::core::OnDevice on_k(k == 0 ? 0 : stages[k - 1]->dev);
+-                if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
++                if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
+                 if (at != nullptr) {
+                     if (!strata::core::conversation_checkpoint_restore(k == 0 ? *at : at->stage_parts[k - 1], to, g, e))
+                         return false;
++                    if (!verify_checkpoint(k==0?*at:at->stage_parts[k-1],to,e)) return false;
+                 } else {
+-                    strata::core::ConversationCheckpoint ck;
++                    strata::core::ConversationCheckpoint local_ck;
++                    strata::core::SlotTraceRelease trace_release(local_ck,"ConversationCheckpoint_release");
++                    auto& ck = slot_copy_reuse ? slot_copy_checkpoint : local_ck;
+                     ck.ids = bs[(size_t) b].ids;
+                     if (!strata::core::conversation_checkpoint_save(ck, from, g, e) ||
+                         !strata::core::conversation_checkpoint_restore(ck, to, g, e))
+                         return false;
++                    if (!verify_checkpoint(ck,to,e)) return false;
+                 }
+                 for (int64_t j = 0; j < from.qsa_alloc; ++j) {
+-                    strata::core::ConversationKv img;
++                    strata::core::SlotTrace trace_layer("kv_layer",-2,(int)k,(int)j);
++                    strata::core::ConversationKv local_img;
++                    strata::core::SlotTraceRelease trace_release(local_img,"ConversationKv_release");
++                    auto& img = slot_copy_reuse ? slot_copy_kv : local_img;
+                     if (!strata::core::conversation_kv_save(img, from.qsa_states[from.qsa_ord0 + j], g, upto, true, e))
+                         return false;
+-                    if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
++                    if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
+                     if (!strata::core::conversation_kv_restore(img, to.qsa_states[to.qsa_ord0 + j], g, upto, true, e))
+                         return false;
++                    if (slot_copy_verify) {
++                        uint64_t fingerprint=0;
++                        if (!strata::core::conversation_kv_verify(img,to.qsa_states[to.qsa_ord0+j],g,upto,true,
++                                                                fingerprint,e)) return false;
++                    }
+                 }
+-                if (cudaDeviceSynchronize() != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
++                if (([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess) { e = "batch slot restore: device sync failed"; return false; }
+             }
+             if (batch_mtp) {
+                 // A returning solo request resumes from its slot's draft KV (on the drafter's device, as above).
+                 const strata::core::OnDevice on_mtp(mtp.device());
+-                strata::core::ConversationKv image;
++                strata::core::ConversationKv local_image;
++                    strata::core::SlotTraceRelease trace_release(local_image,"ConversationKv_release");
++                auto& image = slot_copy_reuse ? slot_copy_kv : local_image;
+                 if (!slot_mtp[(size_t) b]->idle(e) || !mtp.idle(e) ||
+                     !strata::core::conversation_kv_save(image, slot_mtp[(size_t) b]->kv_state(),
+                                                         draft_geometry, upto, false, e) ||
+                     !strata::core::conversation_kv_restore(image, mtp.kv_state(), draft_geometry, upto, false, e) ||
+-                    cudaDeviceSynchronize() != cudaSuccess)
++                    ([&] { strata::core::SlotTrace trace_sync("slot_device_sync"); return cudaDeviceSynchronize(); }()) != cudaSuccess)
+                     return false;
+                 mtp.set_prompt_len(upto);
+             }
+@@ -13017,6 +13068,7 @@ int main(int argc, char** argv) {
+                 bool cont = !cancelled && produced_n == 1 && admit_max_new > 1 && std::strcmp(finish, "length") == 0 &&
+                             (int64_t) live.size() == p;
+                 const auto tc0 = Clock::now();
++                strata::core::SlotTrace admission_trace("admission",admit_slot,-1,-1,0,true);
+                 if (cont && !copy_to_slot(admit_slot, live, err)) {
+                     std::fprintf(stderr, "strata serve: batch admission failed: %s\n", err.c_str());
+                     bs[(size_t) admit_slot].cached = false;   // its sessions may be half written
+@@ -13025,7 +13077,7 @@ int main(int argc, char** argv) {
+                 if (cont) {
+                     ver.set_slot_sampling(admit_slot, req_sp);   // the request's own sampling, row by row
+                     BSlot& sl = bs[(size_t) admit_slot];
+-                    sl = BSlot{};
++                    { strata::core::SlotTrace trace_reset("slot_reset"); sl = BSlot{}; }
+                     sl.active = true;
+                     sl.x = x;
+                     sl.p = p;
+@@ -13034,6 +13086,7 @@ int main(int argc, char** argv) {
+                     sl.t0 = Clock::now();
+                     sl.ids = live;
+                     if (batch_mtp) {
++                        strata::core::SlotTrace trace_draft("draft_first");
+                         if (!slot_mtp[(size_t) admit_slot]->draft_first(1, ver.final_R_all(), sl.x,
+                                                                         sl.p - 1, sl.draft.data(), err)) {
+                             std::fprintf(stderr, "strata batch: MTP admission for slot %d failed: %s\n",
+@@ -13049,7 +13102,8 @@ int main(int argc, char** argv) {
+                         if (c.ids.size() < live.size() && (best == nullptr || c.ids.size() > best->ids.size()) &&
+                             std::equal(c.ids.begin(), c.ids.end(), live.begin()))
+                             best = &c;
+-                    if (best != nullptr && !sl.img) sl.checks.push_back(*best);
++                    { strata::core::SlotTrace trace_checks("checkpoint_retain");
++                      if (best != nullptr && !sl.img) sl.checks.push_back(*best); }
+                     std::fprintf(stderr, "strata batch: slot %d takes %lld tokens (copied in %.1f ms)\n", admit_slot,
+                                  (long long) live.size(), std::chrono::duration<double, std::milli>(Clock::now() - tc0).count());
+                 }
