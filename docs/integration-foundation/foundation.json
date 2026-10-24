@@ -1,0 +1,12 @@
+{
+  "status": "CURRENT_DEPLOYED_IMAGE_SOURCE_AND_CPU_OWNERSHIP_VERIFIED",
+  "source": "3d1fb48090e8f2cefc22d7b5845fb7f5b71f33fa",
+  "image": "sha256:8a42a4011ff601db842265c17ac9b6c41aceace17a4a4973de681e1e3542d533",
+  "native_version": "0.1.45.3",
+  "native_binary_sha256": "57702a8efb7d14dfdc287a217559b59d2d3401660c892b1ab4fc4eb10dff4de3",
+  "scheme_A_sha256": "6484e67ab1ed65a30b115645941b33a9f3845f98b1705ddad55629d130449696",
+  "new_CPU_ownership_tests": 18,
+  "replayer": "Original and close-only intentional negative controls; full A all18 mandatory, actual command completed PASS",
+  "new_GPU_tests": 0,
+  "historical_GPU_scope": "Original deployment qualification belongs to this immutable image; no new GPU test claimed by foundation publication"
+}
